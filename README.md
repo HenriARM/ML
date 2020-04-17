@@ -4,8 +4,6 @@ All training and testing data for Neural Networks is available in my [Google Dri
 
 # Content
 
-https://github.com/HenriARM/ML/blob/master./pytorch-nn/main.py
-
 * [Feed Forward Neural Net wiht NumPy from scratch, replicating PyTorch Layer architecture. Used for non-linear multidimensional regression](./pytorch-nn/main.py)
 * [Naive Bayes with NumPy](./naive-bayes/naive-bayes-iris.ipynb)
 * [Linear Regression with NumpPy](./linear-regression/linear-regression.ipynb)
