@@ -1,6 +1,6 @@
-# PyTorch
 import torch
 import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader, random_split
 
 import numpy as np
 import matplotlib
@@ -26,75 +26,106 @@ class LossCrossEntropy:
         return torch.sum(-torch.log(self.y_predicted[self.y_correct == 1.0]))
 
 
+class IrisDataset(Dataset):
+    def __init__(self, data: np.ndarray, transform=None):
+        super().__init__()
+        self.data = data
+        self.transform = transform
+
+    def __len__(self):
+        return int(self.data.shape[0])
+
+    def __getitem__(self, id):
+        sample = self.data[id]
+        one_hot = np.zeros(OUTPUT_DIM)
+        one_hot[int(sample[4])] = 1.0
+        sample = {'input': sample[:4], 'output': one_hot}
+        if self.transform:
+            sample = self.transform(sample)
+        return sample
+
+
+BATCH_SIZE = 15
+EPOCHS = 10
+INPUT_DIM = 4
+OUTPUT_DIM = 3
+
+
 def main():
     # Load iris dataset with total of 150 samples
     x, y = load_iris(return_X_y=True)
     y = np.reshape(y, (150, 1))
-    # concatenate both x and y to shuffle
+    # concatenate both x and y to shuffle and split
     data = np.concatenate((x, y), axis=1)
-    np.random.shuffle(data)
 
-    # input size is 150
-    batch_size = 15
-    epochs = 10
-    input_dim = 4
-    # on output we get probability of each flower
-    output_dim = 3
-    train_size = batch_size * 8
-    test_size = batch_size * 2
+    dataset = IrisDataset(data)
+    dataset_train, dataset_test = random_split(dataset, [int(len(dataset) * 0.8), int(len(dataset) * 0.2)])
 
-    # instead of storing flower labels, convert to one hot encoding, last data column
-    y = data[:, 4]
-    one_hot = np.zeros((y.size, 3))
-    # arange() creates array with integer indices
-    one_hot[np.arange(y.size), y.astype(int)] = 1.0
-    y = one_hot
+    # https://pytorch.org/docs/1.1.0/_modules/torch/utils/data/dataloader.html
+    data_loader_train = DataLoader(
+        dataset_train,
+        BATCH_SIZE,
+        shuffle=True,
+        drop_last=True,
+    )
 
-    # split into train and test data
-    # remove y as a last column
-    x = np.delete(data, 4, axis=1)
-    x_train, x_test = x[:train_size], x[train_size:]
-    y_train, y_test = y[:train_size], y[train_size:]
+    data_loader_test = DataLoader(
+        dataset_test,
+        BATCH_SIZE,
+        shuffle=True,
+        drop_last=True,
+    )
 
-    model = nn.Sequential(nn.Linear(input_dim, 48, bias=True),
+    model = nn.Sequential(nn.Linear(INPUT_DIM, 48, bias=True),
                           nn.ReLU(),
                           nn.Linear(48, 24, bias=True),
                           nn.Tanh(),
-                          nn.Linear(24, output_dim, bias=True),
+                          nn.Linear(24, OUTPUT_DIM, bias=True),
                           nn.Softmax(dim=1))
 
-    # Training
+    # Training properties
     l_rate = 1e-3
     criterion = LossCrossEntropy()
     optimiser = torch.optim.Adam(model.parameters(), lr=l_rate)
 
-    # Training
     losses = []
-    for epoch in range(epochs):
+    for epoch in range(EPOCHS):
+        print("\nepoch = ", epoch)
+
         # collect metrics for each epoch (calculate average metrics of each batch)
         losses_epoch = []
+        for data_loader in [data_loader_train, data_loader_test]:
+            if data_loader == data_loader_train:
+                print("\n\ttraining:")
+                model = model.train()
+                torch.set_grad_enabled(True)
+            else:
+                print("\n\ttesting:")
+                model = model.eval()
+                torch.set_grad_enabled(False)
+            for i_batch, batch in enumerate(data_loader):
+                print("\t\tbatch = ", i_batch)
 
-        # training data is divided by size of one batch and iterated
-        for batch in range((train_size - batch_size) // batch_size):
-            # clear grads
-            optimiser.zero_grad()
+                # clear grads
+                optimiser.zero_grad()
 
-            # create tensors
-            x_train_batch = torch.from_numpy(x_train[(batch * batch_size): ((batch + 1) * batch_size):])
-            y_train_batch = torch.from_numpy(y_train[(batch * batch_size): ((batch + 1) * batch_size):])
+                # tensors
+                x_train_batch = batch["input"]
+                y_train_batch = batch["output"]
 
-            # forward
-            y_predicted_batch = model.forward(x_train_batch.float())
+                # forward
+                y_predicted_batch = model.forward(x_train_batch.float())
 
-            # loss backward
-            loss = criterion.forward(y_predicted_batch, y_train_batch)
-            loss.backward()
+                if data_loader == data_loader_train:
+                    # loss backward
+                    loss = criterion.forward(y_predicted_batch, y_train_batch)
+                    loss.backward()
 
-            # update parameters
-            optimiser.step()
+                    # update parameters
+                    optimiser.step()
 
-            # metrics
-            losses_epoch.append(loss.detach().numpy())
+                    # metrics
+                    losses_epoch.append(loss.detach().numpy())
 
         # Get mean loss and metrics of epoch batches
         losses.append(np.mean(losses_epoch))
@@ -113,7 +144,7 @@ def main():
     # wait for keyboard press to close tkAgg
     while True:
         if plt.waitforbuttonpress():
-            break
+            exit(0)
 
 
 if __name__ == '__main__':
