@@ -1,9 +1,9 @@
 import numpy as np
-import matplotlib
 
 # scikit only used to load Iris dataset
 from sklearn.datasets import load_iris
 
+import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 
@@ -83,7 +83,7 @@ class LayerReLU:
 
     def forward(self, x: Variable):
         self.x = x
-        self.out = Variable(self.x.value * (self.x.value > 0))
+        self.out = Variable(np.maximum(self.x.value, np.zeros_like(self.x.value)))
         return self.out
 
     def backward(self):
@@ -133,17 +133,14 @@ class LayerSoftmax:
         self.x: Variable = None
         self.out: Variable = None
         self.e_x = None
-        self.sum = None
         self.jacobian = None
 
     def forward(self, x: Variable):
         self.x = x
         # get max elem of each line
-        self.e_x = np.exp(self.x.value - np.expand_dims(np.max(self.x.value, axis=1), axis=1))
+        self.e_x = np.exp(self.x.value - np.max(self.x.value, axis=1, keepdims=True))
         # sum each line <=> second dimension
-        self.sum = self.e_x.sum(axis=1)
-        self.sum = np.expand_dims(self.sum, axis=1)
-        self.out = Variable(self.e_x / self.sum)
+        self.out = Variable(self.e_x / np.sum(self.e_x, axis=1, keepdims=True))
         return self.out
 
     def backward(self):
@@ -165,6 +162,18 @@ class LayerSoftmax:
         self.x.grad = np.matmul(np.expand_dims(self.out.grad, axis=1), self.jacobian)
         # average of second axis, to get (100,2)
         self.x.grad = np.average(self.x.grad, axis=1)
+
+    # def backward(self):
+    #     for idx in range(self.out.value.shape[0]):
+    #         J = np.zeros((self.out.value.shape[1], self.out.value.shape[1]))
+    #         for i in range(self.out.value.shape[1]):
+    #             for j in range(self.out.value.shape[1]):
+    #                 if i == j:
+    #                     J[i, j] = self.out.value[idx][i] * (1 - self.out.value[idx][j])
+    #                 else:
+    #                     J[i, j] = -self.out.value[idx][i] * self.out.value[idx][j]
+    #
+    #         self.x.grad[idx] = np.matmul(J, self.out.grad[idx])
 
     def parameters(self):
         # return empty list, since no coefficients
@@ -199,21 +208,19 @@ class LossCrossEntropy:
 
     def forward(self, y_correct: Variable, y_predicted: Variable):
         self.y_predicted = y_predicted
+
+        # tackle with log(0) and with null pointer exception when calculating grad
+        epsilon = 1e-6
+        self.y_predicted.value += epsilon
+
         self.y_correct = y_correct
-        # since correct output is  a one-hot encoded vector, where all values == 0.0, except one which == 1.0
-        # we can simplify sum of probability multiplication to
-        self.out = np.sum(-np.log(self.y_predicted.value[self.y_correct.value == 1.0]))
+        # output of cross entropy is sum of logarithms of predicted values  multiplied by probability
+        self.out = -np.sum(y_correct.value * np.log(self.y_predicted.value))
         self.out = Variable(np.asarray(self.out))
         return self.out
 
     def backward(self):
-        # for each sample jacobian matrix will be a gradient with zeroes and
-        # only with (-1 / predicted) where sample is correct (==1.0)
-        self.y_predicted.grad = np.array(self.y_predicted.value, copy=True)
-        self.y_predicted.grad = -1 / self.y_predicted.grad
-        # TODO: without line below, result is better
-        self.y_predicted.grad[self.y_correct.value == 0.0] = 0
-        # don't need to multiply by out grad, since its always == 1.0
+        self.y_predicted.grad = self.y_correct.value / self.y_predicted.value
 
 
 class FeedForwardNeuralNet:
@@ -247,8 +254,9 @@ class Optimiser:
 
     def step(self):
         for p in self.parameters:
-            # to minimize loss function using gradient descent, need to go down with gradient
-            p.value -= self.lr * p.grad
+            # to minimize loss function using gradient descent
+            # updating weights using addition is used for cross entropy loss (for mse should subtract grad)
+            p.value += self.lr * p.grad
 
 
 # coefficient of determination: https://en.wikipedia.org/wiki/Coefficient_of_determination
@@ -345,8 +353,8 @@ def main():
     np.random.shuffle(data)
 
     # input size = 150
-    batch_size = 15
-    epochs = 10
+    batch_size = 5
+    epochs = 50
     input_dim = 4
     # on output we get probability of each flower
     output_dim = 3
@@ -367,18 +375,19 @@ def main():
     y_train, y_test = Variable(y[:train_size]), Variable(y[train_size:])
 
     # Instantiate network
-    layers = [LayerLinear(input_dim, 48),
-              LayerSigmoid(),
-              # LayerReLU(),
-              LayerLinear(48, 24),
+    layers = [LayerLinear(input_dim, 8),
+              # LayerSigmoid(),
+              LayerReLU(),
+              LayerLinear(8, 8),
+              LayerReLU(),
               # LayerTanh(),
-              LayerSigmoid(),
-              LayerLinear(24, output_dim),
+              # LayerSigmoid(),
+              LayerLinear(8, output_dim),
               LayerSoftmax()]
     model = FeedForwardNeuralNet(layers)
 
     # Training
-    l_rate = 1e-3
+    l_rate = 1e-2
     criterion = LossCrossEntropy()
     optimiser = Optimiser(model.parameters(), lr=l_rate)
 
@@ -416,37 +425,45 @@ def main():
             # update parameters
             optimiser.step()
 
+            print(f'loss: {loss.value}')
+
         # Get mean loss and metrics of epoch batches
         losses.append(np.mean(losses_epoch))
         accuracies.append(np.mean(accuracies_epoch))
         r2_scores.append(np.mean(r2_scores_epoch))
         f1_scores.append(np.mean(f1_scores_epoch))
 
-        # Clear the current figure
         plt.clf()
-
-        # Plot loss over epoch
-        plt.subplot(4, 1, 1)
         plt.title('loss')
-        plt.plot(np.arange(epoch + 1), np.array(losses), 'r-', label='loss')
-
-        # Plot R2 score over epoch
-        plt.subplot(4, 1, 2)
-        plt.title('r2')
-        plt.plot(np.arange(epoch + 1), np.array(r2_scores), 'r-', label='r2')
-
-        # Plot F1 score over epoch
-        plt.subplot(4, 1, 3)
-        plt.title('f1')
-        plt.plot(np.arange(epoch + 1), np.array(f1_scores), 'r-', label='f1')
-
-        # Plot accuracy over epoch
-        plt.subplot(4, 1, 4)
-        plt.title('accuracy')
-        plt.plot(np.arange(epoch + 1), np.array(accuracies), 'r-', label='accuracy')
-
+        plt.plot(np.arange(epoch + 1), np.array(losses), 'r-', label='train_loss')
         plt.draw()
         plt.pause(0.1)
+
+        # # Clear the current figure
+        # plt.clf()
+        #
+        # # Plot loss over epoch
+        # plt.subplot(4, 1, 1)
+        # plt.title('loss')
+        # plt.plot(np.arange(epoch + 1), np.array(losses), 'r-', label='loss')
+        #
+        # # Plot R2 score over epoch
+        # plt.subplot(4, 1, 2)
+        # plt.title('r2')
+        # plt.plot(np.arange(epoch + 1), np.array(r2_scores), 'r-', label='r2')
+        #
+        # # Plot F1 score over epoch
+        # plt.subplot(4, 1, 3)
+        # plt.title('f1')
+        # plt.plot(np.arange(epoch + 1), np.array(f1_scores), 'r-', label='f1')
+        #
+        # # Plot accuracy over epoch
+        # plt.subplot(4, 1, 4)
+        # plt.title('accuracy')
+        # plt.plot(np.arange(epoch + 1), np.array(accuracies), 'r-', label='accuracy')
+        #
+        # plt.draw()
+        # plt.pause(0.1)
 
     # wait for keyboard press to close tkAgg
     while True:
