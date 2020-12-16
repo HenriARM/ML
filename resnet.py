@@ -34,7 +34,7 @@ class ResidualBlock(nn.Module):
             nn.ReLU(),
             conv_plus_norm(in_channels=self.out_channels, out_channels=self.out_channels, kernel_size=3, padding=1, stride=1)
         )
-        # TODO: is there 2 solutions to match spatial dimensions, conv 1x1 /2 or linear projection with data padding?
+        # TODO: there is 2 ways to match spatial dimensions, conv 1x1 /2 or linear projection with data padding, no?
         # TODO: how conv 1x1 with stride 2 will match if downsamples by half?
         self.shortcut = nn.Identity()
         # if self.in_channels != self.out_channels:
@@ -77,7 +77,7 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         # TODO: read about and use nn.ModuleList
-        # TODO: still didn't get why striding for downsampling is better than pooling
+        # TODO: still didn't get when use striding for downsampling is better than pooling?
         #  https://stats.stackexchange.com/questions/387482/pooling-vs-stride-for-downsampling/387522
         self.gate1 = nn.Sequential(
             # TODO: should be bias false, so computations get faster? bias=False
@@ -86,11 +86,9 @@ class Encoder(nn.Module):
             # TODO: read about BatchNorm2d
             nn.BatchNorm2d(16),
             nn.ReLU(),
-            # TODO: when to use stride 2?
             # out = (28 + 2*2 - 3) / 2 + 1   (16)
             nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
         )
-        # TODO: should we multiply input channel by self.expansion?
         self.gate2 = ResidualGate(in_channels=16, out_channels=32, blocks=2)
         self.gate3 = ResidualGate(in_channels=32, out_channels=64, blocks=2)
         self.gate4 = ResidualGate(in_channels=64, out_channels=128, blocks=2)
@@ -138,13 +136,20 @@ def main():
         transform=transforms.Compose([transforms.ToTensor()])
     )
 
+    test_set = torchvision.datasets.FashionMNIST(
+        root='./datasets/FashionMNIST/train',
+        train=True,
+        download=True,
+        transform=transforms.Compose([transforms.ToTensor()])
+    )
+
     EPOCHS = 1
     BATCH_SIZE = 64
     lr = 1e-4
 
     train_loader = DataLoader(dataset=train_set, batch_size=BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(dataset=train_set, batch_size=BATCH_SIZE, shuffle=True)
 
-    # TODO: read about torchsummary
     model = ResNet(in_channels=1, n_classes=10)
     summary(model, (1, 28, 28))
 
@@ -155,18 +160,17 @@ def main():
     }
     for epoch in range(EPOCHS):
         print("\nepoch = ", epoch)
-        # for loader in [train_loader, test_loader]:
-        for loader in [train_loader]:
+        for loader in [train_loader, test_loader]:
             if loader == train_loader:
-                # print("\n\ttraining:")
+                print("\n\ttraining:")
                 meter_prefix = "train"
                 model = model.train()
                 torch.set_grad_enabled(True)
-            # else:
-            #     print("\n\ttesting:")
-            #     meter_prefix = "test"
-            #     model = model.eval()
-            #     torch.set_grad_enabled(False)
+            else:
+                print("\n\ttesting:")
+                meter_prefix = "test"
+                model = model.eval()
+                torch.set_grad_enabled(False)
 
             losses = AverageValueMeter()
             for x, y_idx in loader:
@@ -191,8 +195,10 @@ def main():
                     loss.backward()
                     optimizer.step()
                     optimizer.zero_grad()
+
             # losses.value is average loss of all batches
             meters[f'{meter_prefix}_loss'].append(losses.value()[0])
+            print(losses.value()[0])
     print(meters)
 
 
