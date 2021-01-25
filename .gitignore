@@ -1,3 +1,4 @@
-./datasets
-./env
-./tmp
+datasets/
+env/
+tmp/
+.idea/
