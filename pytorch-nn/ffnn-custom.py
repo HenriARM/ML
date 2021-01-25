@@ -1,9 +1,7 @@
 import numpy as np
-
 import matplotlib
 
 matplotlib.use("TkAgg")
-
 import matplotlib.pyplot as plt
 
 
@@ -18,7 +16,7 @@ class Variable:
         assert self.value.shape == self.grad.shape
 
 
-# Applies a linear transformation to the incoming data: y = xW + b, coefficients W and b are differentiated
+# Applies a linear transformation to the incoming datasets: y = xW + b, coefficients W and b are differentiated
 class LayerLinear:
     def __init__(self, in_features, out_features):
         # initialize coefficients with real numbers from 0..1
@@ -53,7 +51,7 @@ class LayerLinear:
         return l
 
 
-# Applies a sigmoid function
+# Applies a sigmoid function y(x) = 1 / (1 + e^(-x))
 class LayerSigmoid:
     def __init__(self):
         self.x: Variable = None
@@ -126,7 +124,47 @@ class LayerTanh:
 
 # Applies the Softmax function to an n-dimensional input Tensor rescaling them
 # so that the elements of the n-dimensional output Tensor lie in the range [0,1] and sum to 1.
-# TODO
+# shift in forward() is used to minimize calculations <=> dividing all e^x to constant e^D, to calculate only e^x-D
+class LayerSoftmax:
+    def __init__(self):
+        self.x: Variable = None
+        self.out: Variable = None
+        self.e_x = None
+        self.sum = None
+        self.jacobian = None
+
+    def forward(self, x: Variable):
+        self.x = x
+        # get max elem of each line
+        self.e_x = np.exp(self.x.value - np.max(self.x.value, axis=1))
+        # sum each line <=> second dimension
+        self.sum = self.e_x.sum(axis=1)
+        self.sum = np.expand_dims(self.sum, axis=1)
+        self.out = Variable(self.e_x / self.sum)
+        return self.out
+
+    def backward(self):
+        # create Jacobian matrix NxN with softmax derivatives, e.x. (100, 2, 2)
+        self.jacobian = np.zeros(self.x.grad[0], self.x.grad[1], self.x.grad[1])
+        # D_i S_j = S_i (1 - S_i) if i = j | - S_j * S_i if i != j;
+        # check https://eli.thegreenplace.net/2016/the-softmax-function-and-its-derivative/
+        # jacobian[k,i,j]
+        for k in range(self.jacobian.shape[0]):
+            for i in range(self.jacobian.shape[1]):
+                for j in range(self.jacobian.shape[2]):
+                    if i == j:
+                        self.jacobian[k][i][j] = self.out[k][i] * (1 - self.out[k][i])
+                    else:
+                        self.jacobian[k][i][j] = self.out[k][i] * self.out[k][j]
+
+        # (100, 1, 2) = (100, 1, 2) x (100, 2, 2)
+        self.x.grad = np.matmul(np.exp(self.out.grad, axis=1), self.jacobian)
+        # average of second axis, to get (100,2)
+        self.x.grad = np.average(self.x.grad, axis=1)
+
+    def parameters(self):
+        # return empty list, since no coefficients
+        return list()
 
 
 # Applies a Mean Squared Error estimator
@@ -175,6 +213,7 @@ class Optimiser:
     def __init__(self, parameters: list, lr):
         # list of variables
         self.parameters = parameters
+        # learning rate
         self.lr = lr
 
     def step(self):
@@ -203,85 +242,93 @@ Stochastic Gradient Descent. Batch Size = 1
 Mini-Batch Gradient Descent. 1 < Batch Size < Size of Training Set
 '''
 
-# Generate the input data
 
-batch_size = 32
-epochs = 10
-input_dim = 2
-output_dim = 1
-train_size = batch_size * 80
-test_size = batch_size * 20
+def main():
+    # Generate the input datasets
 
-x = np.random.random((train_size + test_size, input_dim))
-# y = x_1^2 + x_2
-y = np.asarray([i[0] ** 2 + i[1] for i in x], dtype=np.float32).reshape(-1, 1)
+    batch_size = 32
+    epochs = 10
+    input_dim = 2
+    output_dim = 1
+    train_size = batch_size * 80
+    test_size = batch_size * 20
 
-x_train, x_test = Variable(x[:train_size]), Variable(x[train_size:])
-y_train, y_test = Variable(y[:train_size]), Variable(y[train_size:])
+    x = np.random.random((train_size + test_size, input_dim))
+    # y = x_1^2 + x_2
+    y = np.asarray([i[0] ** 2 + i[1] for i in x], dtype=np.float32).reshape(-1, 1)
 
-# Instantiate network
+    x_train, x_test = Variable(x[:train_size]), Variable(x[train_size:])
+    y_train, y_test = Variable(y[:train_size]), Variable(y[train_size:])
 
-# layers = [LayerLinear(input_dim, 40),
-#           LayerSigmoid(),
-#           LayerLinear(40, 20),
-#           LayerSigmoid(),
-#           LayerLinear(20, output_dim)]
+    # Instantiate network
 
-layers = [LayerLinear(input_dim, 40),
-          LayerReLU(),
-          LayerLinear(40, 20),
-          LayerTanh(),
-          LayerLinear(20, output_dim)]
-model = FeedForwardNeuralNet(layers)
+    # layers = [LayerLinear(input_dim, 40),
+    #           LayerSigmoid(),
+    #           LayerLinear(40, 20),
+    #           LayerSigmoid(),
+    #           LayerLinear(20, output_dim)]
 
-# Training
-l_rate = 1e-3
-loss = LossMSE()
-optimiser = Optimiser(model.parameters(), lr=l_rate)
+    layers = [LayerLinear(input_dim, 40),
+              LayerReLU(),
+              LayerLinear(40, 20),
+              LayerTanh(),
+              LayerLinear(20, output_dim)]
+    model = FeedForwardNeuralNet(layers)
 
-r2_scores = []
-losses = []
-for epoch in range(epochs):
-    # collect metrics for each epoch (calculate average metrics of each batch)
-    losses_epoch = []
-    r2_scores_epoch = []
+    # Training
+    l_rate = 1e-3
+    loss = LossMSE()
+    optimiser = Optimiser(model.parameters(), lr=l_rate)
 
-    # training data is divided by size of one batch and iterated
-    for batch in range((train_size - batch_size) // batch_size):
-        x_train_batch = Variable(x_train.value[(batch * batch_size): ((batch + 1) * batch_size):])
-        y_train_batch = Variable(y_train.value[(batch * batch_size): ((batch + 1) * batch_size):])
+    r2_scores = []
+    losses = []
+    for epoch in range(epochs):
+        # collect metrics for each epoch (calculate average metrics of each batch)
+        losses_epoch = []
+        r2_scores_epoch = []
 
-        # forward
-        y_predicted = model.forward(x_train_batch)
+        # training datasets is divided by size of one batch and iterated
+        for batch in range((train_size - batch_size) // batch_size):
+            x_train_batch = Variable(x_train.value[(batch * batch_size): ((batch + 1) * batch_size):])
+            y_train_batch = Variable(y_train.value[(batch * batch_size): ((batch + 1) * batch_size):])
 
-        # metrics
-        losses_epoch.append(loss.forward(y_train_batch, y_predicted).value)
-        r2_scores_epoch.append(r2_score(y_train.value, y_predicted.value))
+            # forward
+            y_predicted = model.forward(x_train_batch)
 
-        # backward
-        loss.backward()
-        model.backward()
+            # metrics
+            losses_epoch.append(loss.forward(y_train_batch, y_predicted).value)
+            r2_scores_epoch.append(r2_score(y_train.value, y_predicted.value))
 
-        # update parameters
-        optimiser.step()
+            # backward
+            loss.backward()
+            model.backward()
 
-    # Get mean loss and r2 score of epoch batches
-    losses.append(np.mean(losses_epoch))
-    r2_scores.append(np.mean(r2_scores_epoch))
+            # update parameters
+            optimiser.step()
 
-    # Clear the current figure
-    plt.clf()
+        # Get mean loss and r2 score of epoch batches
+        losses.append(np.mean(losses_epoch))
+        r2_scores.append(np.mean(r2_scores_epoch))
 
-    # Plot loss over epoch
-    plt.subplot(2, 1, 1)
-    plt.title('loss')
-    plt.plot(np.arange(epoch + 1), np.array(losses), 'r-', label='loss')
+        # Clear the current figure
+        plt.clf()
 
-    # Plot R2 score over epoch
-    plt.subplot(2, 1, 2)
-    plt.title('r2')
-    plt.plot(np.arange(epoch + 1), np.array(r2_scores), 'r-', label='r2')
+        # Plot loss over epoch
+        plt.subplot(2, 1, 1)
+        plt.title('loss')
+        plt.plot(np.arange(epoch + 1), np.array(losses), 'r-', label='loss')
 
-    plt.draw()
-    plt.pause(0.1)
-    # TODO: tkinter instantly closes when finishing to plot
+        # Plot R2 score over epoch
+        plt.subplot(2, 1, 2)
+        plt.title('r2')
+        plt.plot(np.arange(epoch + 1), np.array(r2_scores), 'r-', label='r2')
+
+        plt.draw()
+    # wait for keyboard press to close tkAgg
+    while True:
+        if plt.waitforbuttonpress():
+            break
+
+
+if __name__ == '__main__':
+    main()
