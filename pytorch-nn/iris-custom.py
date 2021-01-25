@@ -19,7 +19,7 @@ class Variable:
         assert self.value.shape == self.grad.shape
 
 
-# Applies a linear transformation to the incoming data: y = xW + b, coefficients W and b are differentiated
+# Applies a linear transformation to the incoming datasets: y = xW + b, coefficients W and b are differentiated
 class LayerLinear:
     def __init__(self, in_features, out_features):
         # initialize coefficients with real numbers from 0..1
@@ -296,7 +296,7 @@ def f1_score(y_correct: np.ndarray, y_predicted: np.ndarray):
     predicted = np.argmax(y_predicted, axis=1)
     correct = np.argmax(y_correct, axis=1)
 
-    # NxN matrix (N is different class amount) as in tutorial where column used for correct data and rows for predicted
+    # NxN matrix (N is different class amount) as in tutorial where column used for correct datasets and rows for predicted
     table = np.zeros((y_correct.shape[1], y_predicted.shape[1]))
     for i in range(predicted.shape[0]):
         table[predicted[i], correct[i]] += 1
@@ -368,7 +368,7 @@ def main():
     one_hot[np.arange(y.size), y.astype(int)] = 1.0
     y = one_hot
 
-    # split into train and test data
+    # split into train and test datasets
     # remove y as a last column
     x = np.delete(data, 4, axis=1)
     x_train, x_test = Variable(x[:train_size]), Variable(x[train_size:])
@@ -403,7 +403,7 @@ def main():
         r2_scores_epoch = []
         f1_scores_epoch = []
 
-        # training data is divided by size of one batch and iterated
+        # training datasets is divided by size of one batch and iterated
         for batch in range((train_size - batch_size) // batch_size):
             x_train_batch = Variable(x_train.value[(batch * batch_size): ((batch + 1) * batch_size):])
             y_train_batch = Variable(y_train.value[(batch * batch_size): ((batch + 1) * batch_size):])
@@ -474,7 +474,7 @@ def main():
     y_predicted = model.forward(x_test)
 
     # Metrics
-    print("On Test data, results are following:\n")
+    print("On Test datasets, results are following:\n")
     print("loss = ", np.mean(criterion.forward(y_test, y_predicted).value))
     print("r2 = ", r2_score(y_test.value, y_predicted.value))
     print("f1 = ", f1_score(y_test.value, y_predicted.value))
