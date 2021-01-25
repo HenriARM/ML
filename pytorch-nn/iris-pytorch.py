@@ -2,6 +2,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
 
+import tensorboardX
+
+tb = tensorboardX.SummaryWriter(log_dir='./iris')
+
+from torchnet.meter import AverageValueMeter, ClassErrorMeter
+from metrics_utils import MetricAccuracyClassification
+
 import numpy as np
 import matplotlib
 
@@ -38,7 +45,9 @@ class IrisDataset(Dataset):
     def __getitem__(self, id):
         sample = self.data[id]
         one_hot = np.zeros(OUTPUT_DIM)
+        # label is on the latest column of input array
         one_hot[int(sample[4])] = 1.0
+        # TODO:
         sample = {'input': sample[:4], 'output': one_hot}
         if self.transform:
             sample = self.transform(sample)
@@ -88,21 +97,41 @@ def main():
     criterion = LossCrossEntropy()
     optimiser = torch.optim.Adam(model.parameters(), lr=l_rate)
 
-    losses = []
+    meters = {
+        "train_loss": AverageValueMeter(),
+        "test_loss": AverageValueMeter(),
+
+        "train_acc": ClassErrorMeter(accuracy=True),
+        "test_acc": ClassErrorMeter(accuracy=True)
+    }
+
+    # TODO: convert to meters
+    # train_losses = []
+    # test_losses = []
+
     for epoch in range(EPOCHS):
         print("\nepoch = ", epoch)
 
-        # collect metrics for each epoch (calculate average metrics of each batch)
-        losses_epoch = []
+        # reset meters to default settings before each epoch
+        for k in meters.keys():
+            meters[k].reset()
+
         for data_loader in [data_loader_train, data_loader_test]:
             if data_loader == data_loader_train:
                 print("\n\ttraining:")
+                meter_prefix = "train"
                 model = model.train()
                 torch.set_grad_enabled(True)
             else:
                 print("\n\ttesting:")
+                meter_prefix = "test"
+                # automatically turns off some modules (like DropOut), which are not used during testing
                 model = model.eval()
                 torch.set_grad_enabled(False)
+
+            meter_batch_loss = AverageValueMeter()
+            # meter_batch_F1 = MetricAccuracyClassification()
+
             for i_batch, batch in enumerate(data_loader):
                 print("\t\tbatch = ", i_batch)
 
@@ -110,41 +139,59 @@ def main():
                 optimiser.zero_grad()
 
                 # tensors
-                x_train_batch = batch["input"]
-                y_train_batch = batch["output"]
+                # TODO:
+                # you should get in loop already X_train, Y_train, to do that,
+                # you need to send back tuple for data_Loader
+                x_batch = batch["input"]
+                y_batch = batch["output"]
 
                 # forward
-                y_predicted_batch = model.forward(x_train_batch.float())
+                y_predicted_batch = model.forward(x_batch.float())
+                loss = criterion.forward(y_predicted_batch, y_batch)
 
+                # update parameters when training
                 if data_loader == data_loader_train:
-                    # loss backward
-                    loss = criterion.forward(y_predicted_batch, y_train_batch)
                     loss.backward()
-
-                    # update parameters
                     optimiser.step()
 
-                    # metrics
-                    losses_epoch.append(loss.detach().numpy())
+                # update metrics
+                meter_batch_loss.add(loss.detach().numpy())
+                # TODO: assertion error
+                meters[f'{meter_prefix}_acc'].add(y_predicted_batch.detach().numpy(), y_batch.detach().numpy())
+                # TODO: do F1 score, store two variables both for train and test. Add fp, tp during each batch:
+                # meterF1.fp += 1
 
-        # Get mean loss and metrics of epoch batches
-        losses.append(np.mean(losses_epoch))
+            meters[f'{meter_prefix}_loss'].add(meter_batch_loss.value()[0])
 
-        # Clear the current figure
-        plt.clf()
+            tb.add_scalar(
+                tag=f'{meter_prefix}_loss',
+                scalar_value=meter_batch_loss.value()[0],
+                global_step=epoch
+            )
 
-        # Plot loss over epoch
-        plt.subplot(1, 1, 1)
-        plt.title('loss')
-        plt.plot(np.arange(epoch + 1), np.array(losses), 'r-', label='loss')
+            # TODO: temp code
+            # temp_loss = meter_batch_loss.value()[0]
+            # if data_loader == data_loader_train:
+            #     train_losses.append(temp_loss)
+            # else:
+            #     test_losses.append(temp_loss)
 
-        plt.draw()
-        plt.pause(0.1)
 
-    # wait for keyboard press to close tkAgg
-    while True:
-        if plt.waitforbuttonpress():
-            exit(0)
+    # TODO: how to plot each epoch, not gather as array and plot at the end?
+    # fig, ax = plt.subplots()
+    # ax.plot(train_losses, test_losses)
+    #
+    # tb.add_figure(
+    #     tag='train_test_loss',
+    #     figure=fig,
+    #     # global_step=epoch
+    # )
+
+    tb.close()
+
+    # TODO: print accuracoies
+    # print('Train Acc:' + meters['train_acc'].value())
+    # print('Test Acc:' + meters['test_acc'].value())
 
 
 if __name__ == '__main__':
