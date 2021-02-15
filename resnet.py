@@ -16,10 +16,9 @@ if torch.cuda.is_available():
     DEVICE = 'cuda'
 
 
-def conv_plus_norm(in_channels, out_channels, kernel_size, padding, stride):
+def conv_3x3(in_channels, out_channels):
     return nn.Sequential(
-        nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding,
-                  stride=stride),
+        nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1, stride=1),
         nn.ReLU(),
         nn.BatchNorm2d(num_features=out_channels)
     )
@@ -30,47 +29,26 @@ class ResidualBlock(nn.Module):
         super(ResidualBlock, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        # ResNet conv layers try not to change image size p = (k - 1)/2, our kernel is odd
-        # TODO: create conv_3x3 class
         self.layers = nn.Sequential(
-            conv_plus_norm(in_channels=self.in_channels, out_channels=self.out_channels, kernel_size=3, padding=1,
-                           stride=1),
+            conv_3x3(in_channels=self.in_channels, out_channels=self.out_channels),
             nn.ReLU(),
-            conv_plus_norm(in_channels=self.out_channels, out_channels=self.out_channels, kernel_size=3, padding=1,
-                           stride=1)
+            conv_3x3(in_channels=self.out_channels, out_channels=self.out_channels)
         )
-        # TODO: change linear projection to conv with no W,H change
-        # TODO: dont use shortcut variable, do shortcut always in forward, since we store some vars in classs to see gradients
-
-        self.shortcut = nn.Identity()
-        # if self.in_channels != self.out_channels:
-        #     self.shortcut = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=2, stride=2)
+        self.shortcut = conv_3x3(in_channels=self.in_channels, out_channels=self.out_channels)
 
     def forward(self, x):
-        residual = x
+        residual = self.shortcut(x)
         x = self.layers(x)
-        if self.in_channels != self.out_channels:
-            # all filters in resnet are even
-            shift = (self.out_channels - self.in_channels) // 2
-            # TODO: try also instead of conv use pooling layer of channels or upscaling
-            residual = pad(residual, (0, 0, 0, 0, shift, shift, 0, 0), 'constant', 0)
         return x + residual
 
 
 class ResidualGate(nn.Module):
     def __init__(self, in_channels, out_channels, blocks):
         super(ResidualGate, self).__init__()
-        self.blocks = [
-            ResidualBlock(in_channels=in_channels, out_channels=out_channels)
-        ]
-        for i in range(blocks - 1):
-            self.blocks.append(ResidualBlock(in_channels=out_channels, out_channels=out_channels))
-
-        # TODO: use Sequential
-        # self.blocks = nn.Sequential(
-        #     ResidualBlock(in_channels=in_channels, out_channels=out_channels),
-        #     *[ResidualBlock(in_channels=(out_channels), out_channels=out_channels for _ in range(blocks - 1)]
-        # )
+        self.blocks = nn.Sequential(
+            ResidualBlock(in_channels=in_channels, out_channels=out_channels),
+            *[ResidualBlock(in_channels=out_channels, out_channels=out_channels) for _ in range(blocks - 1)]
+        )
 
     def forward(self, x):
         for block in self.blocks:
@@ -78,38 +56,27 @@ class ResidualGate(nn.Module):
         return x
 
 
-class Encoder(nn.Module):
-    def __init__(self, in_channels):
-        super(Encoder, self).__init__()
-        self.gate1 = nn.Sequential(
-            # out = (28 + 2*2 - 3) / 1 + 1   (28)
-            nn.Conv2d(in_channels=in_channels, out_channels=16, kernel_size=3, stride=2, padding=0, bias=False),
-            # TODO: read about BatchNorm2d
+class ResNet(nn.Module):
+    def __init__(self, in_channels, n_classes):
+        super(ResNet, self).__init__()
+        self.input = nn.Sequential(
+            # out = (28 + 2*1 - 3) / 1 + 1   (28)
+            nn.Conv2d(in_channels=in_channels, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(16),
             nn.ReLU(),
-            # out = (28 + 2*2 - 3) / 2 + 1   (16)
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
+            # out = (28 + 2*1 - 3) / 2 + 1   (14)
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         )
-        self.gate2 = ResidualGate(in_channels=16, out_channels=32, blocks=2)
-        self.gate3 = ResidualGate(in_channels=32, out_channels=64, blocks=2)
-        self.gate4 = ResidualGate(in_channels=64, out_channels=128, blocks=2)
-        self.gates = [self.gate2, self.gate3, self.gate4]
+        size = [16, 32, 64, 128]
+        self.gates = nn.ModuleList(
+            [ResidualGate(in_channels=i[0], out_channels=i[1], blocks=2) for i in tuple(zip(size, size[1:]))]
+        )
+        self.fc = nn.Linear(in_features=128, out_features=n_classes)
 
     def forward(self, x):
-        x = self.gate1(x)
+        x = self.input(x)
         for gate in self.gates:
             x = gate.forward(x)
-        return x
-
-
-# TODO: don't use Decoder architecture, put all Encoder and Decoder in ResNet class
-class Decoder(nn.Module):
-    def __init__(self, in_features, n_classes):
-        super(Decoder, self).__init__()
-        # self.avg = nn.AdaptiveAvgPool2d(output_size=(1, 1))
-        self.fc = nn.Linear(in_features=in_features, out_features=n_classes)
-
-    def forward(self, x):
         x = torch.nn.functional.adaptive_avg_pool2d(x, output_size=(1, 1))
         x = x.reshape(x.size(0), -1)
         x = self.fc(x)
@@ -117,30 +84,18 @@ class Decoder(nn.Module):
         return x
 
 
-class ResNet(nn.Module):
-    def __init__(self, in_channels, n_classes):
-        super(ResNet, self).__init__()
-        self.encoder = Encoder(in_channels=in_channels)
-        self.decoder = Decoder(in_features=128, n_classes=10)
-
-    def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
-
-
 def main():
     # Use standard FashionMNIST dataset
     train_set = torchvision.datasets.FashionMNIST(
-        root='./datasets/FashionMNIST/test',
+        root='./datasets',
         train=True,
         download=True,
         transform=transforms.Compose([transforms.ToTensor()])
     )
 
     test_set = torchvision.datasets.FashionMNIST(
-        root='./datasets/FashionMNIST/train',
-        train=True,
+        root='./datasets',
+        train=False,
         download=True,
         transform=transforms.Compose([transforms.ToTensor()])
     )
@@ -149,7 +104,7 @@ def main():
     BATCH_SIZE = 64
     lr = 1e-4
 
-    train_loader = DataLoader(dataset=test_set, batch_size=BATCH_SIZE, shuffle=True)
+    train_loader = DataLoader(dataset=train_set, batch_size=BATCH_SIZE, shuffle=True)
     test_loader = DataLoader(dataset=test_set, batch_size=BATCH_SIZE, shuffle=True)
 
     model = ResNet(in_channels=1, n_classes=10)
@@ -176,6 +131,7 @@ def main():
 
             losses = AverageValueMeter()
             for x, y_idx in loader:
+                # ?
                 if losses.n > 10:
                     break
 
@@ -210,6 +166,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-# TODO: add pytorch ModuleList, so all modules can see each other,
-#  instead of python list of Modules (also so we could query trainable parameters)
