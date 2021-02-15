@@ -9,11 +9,14 @@ import torch
 from torch.optim import Adam
 from torchnet.meter import AverageValueMeter
 
-import torchvision.models.resnet
 
 DEVICE = 'cpu'
 if torch.cuda.is_available():
     DEVICE = 'cuda'
+
+EPOCHS = 2
+BATCH_SIZE = 64
+lr = 1e-4
 
 
 def conv_3x3(in_channels, out_channels):
@@ -100,14 +103,11 @@ def main():
         transform=transforms.Compose([transforms.ToTensor()])
     )
 
-    EPOCHS = 10
-    BATCH_SIZE = 64
-    lr = 1e-4
-
     train_loader = DataLoader(dataset=train_set, batch_size=BATCH_SIZE, shuffle=True)
     test_loader = DataLoader(dataset=test_set, batch_size=BATCH_SIZE, shuffle=True)
 
     model = ResNet(in_channels=1, n_classes=10)
+    model.to(DEVICE)
     summary(model, (1, 28, 28))
 
     optimizer = Adam(model.parameters(), lr=lr)
@@ -131,27 +131,28 @@ def main():
 
             losses = AverageValueMeter()
             for x, y_idx in loader:
-                # ?
-                if losses.n > 10:
-                    break
+                # if losses.n > 10:
+                #     break
+
+                x = x.to(DEVICE)
+                y_idx = y_idx.to(DEVICE)
+                y_prim = model.forward(x)
+
+                # use custom implemented cross-entropy
+                # loss = -torch.mean(torch.log(y_prim + 1e-8)[torch.arange(BATCH_SIZE), y_idx])
+                # print(loss)
 
                 # convert label to one-hot encoded
                 y = torch.zeros((x.size(0), 10))
                 y[torch.arange(x.size(0)), y_idx] = 1.0
-
-                x = x.to(DEVICE)
                 y = y.to(DEVICE)
-                y_prim = model.forward(x)
 
-                # use custom implemented cross-entropy
                 # batch loss
-                # loss = -torch.mean(y * torch.log(y_prim + 1e-8))
-                loss = -torch.mean(torch.log(y_prim + 1e-8)[torch.arange(BATCH_SIZE), y_idx])
-                # print(loss)
+                loss = -torch.mean(y * torch.log(y_prim + 1e-8))
 
                 # loss.to('cpu').item() => single scalar value
                 # loss.to('cpu').data.numpy() => matrix
-                losses.add(loss.to('cpu').item())
+                losses.add(loss.to(DEVICE).item())
 
                 if loader == train_loader:
                     loss.backward()
@@ -165,4 +166,5 @@ def main():
 
 
 if __name__ == '__main__':
+    # with tf.device('/device:GPU:0'):
     main()
