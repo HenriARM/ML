@@ -152,6 +152,9 @@ def train(config):
     print(meters)
     pass
 
+# TODO: one csv for all runs hyperparams to compare (best and lost loss)
+# TODO: for each run its own loss, metrics file (all epoch loss)
+
 
 def main(num_samples):
     # EPOCHS = 10
