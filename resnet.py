@@ -104,10 +104,10 @@ def main():
     )
 
     train_loader = DataLoader(dataset=train_set, batch_size=BATCH_SIZE, shuffle=True)
-    test_loader = DataLoader(dataset=test_set, batch_size=BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(dataset=test_set, batch_size=BATCH_SIZE, shuffle=False)
 
     model = ResNet(in_channels=1, n_classes=10)
-    model.to(DEVICE)
+    model = model.to(DEVICE)
     summary(model, (1, 28, 28))
 
     optimizer = Adam(model.parameters(), lr=lr)
