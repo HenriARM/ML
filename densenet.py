@@ -1,18 +1,16 @@
 import torch
-from functools import reduce
 import numpy as np
 import matplotlib.pyplot as plt
 import torchvision
 import torch.utils.data
 import torch.nn.functional
-from scipy.ndimage import gaussian_filter1d
+from torchsummary import summary
+from torch.optim import Adam
 
-# TODO:? why
-# from torch.utils.data import Dataset
-
-MAX_LEN = 200
+EPOCHS = 10
 BATCH_SIZE = 16
-
+lr = 1e-4
+MAX_LEN = 1000
 DEVICE = 'cpu'
 if torch.cuda.is_available():
     DEVICE = 'cuda'
@@ -23,40 +21,27 @@ class DatasetFashionMNIST(torch.utils.data.Dataset):
     def __init__(self, is_train):
         super().__init__()
         self.data = torchvision.datasets.FashionMNIST(
-            root='./data',
+            root='./datasets',
             train=is_train,
             download=True
         )
 
     def __len__(self):
+        # len is called before iterating data loader
         if MAX_LEN:
             return MAX_LEN
-        # TODO: does it shorten data size
         return len(self.data)
 
     def __getitem__(self, idx):
-        # TODO: read about torch.FloatTensor
+        # PIL image is returned
         pil_x, y_idx = self.data[idx]
         np_x = np.array(pil_x)
         np_x = np.expand_dims(np_x, axis=0)  # (1, W, H)
         np_y = np.zeros((10,))
         np_y[y_idx] = 1.0
-        # TODO: why we are returning this type
+        # type(torch.tensor(np_x)) - <class 'torch.Tensor'>, torch.tensor(np_x).dtype - torch.uint8
+        # type(torch.FloatTensor(np_x)) - <class 'torch.Tensor'>, torch.FloatTensor(np_x).dtype - torch.float32
         return torch.FloatTensor(np_x), torch.FloatTensor(np_y)
-
-
-# TODO:
-data_loader_train = torch.utils.data.DataLoader(
-    dataset=DatasetFashionMNIST(is_train=True),
-    batch_size=BATCH_SIZE,
-    shuffle=True
-)
-
-data_loader_test = torch.utils.data.DataLoader(
-    dataset=DatasetFashionMNIST(is_train=False),
-    batch_size=BATCH_SIZE,
-    shuffle=False
-)
 
 
 class Reshape(torch.nn.Module):
@@ -91,17 +76,16 @@ class TransitionLayer(torch.nn.Module):
 
 
 class DenseBlock(torch.nn.Module):
-    def __init__(self, in_features, num_chains=4):
+    def __init__(self, in_features, num_chains):
         super().__init__()
-        # TODO: use ModuleList
-        self.chains = []
+        self.chains = torch.nn.ModuleList()
 
         out_features = 0
-        for _ in range(num_chains):
+        for i in range(num_chains):
             out_features += in_features
-            self.chains.append(torch.nn.Sequential(
-                torch.nn.ReLU(),
+            self.chains.add_module(f'conv{i}', torch.nn.Sequential(
                 torch.nn.BatchNorm2d(out_features),
+                torch.nn.ReLU(),
                 torch.nn.Conv2d(
                     in_channels=out_features,
                     out_channels=in_features,
@@ -115,144 +99,135 @@ class DenseBlock(torch.nn.Module):
             x = torch.cat([x, chain.forward(x)], dim=1)
         return x
 
-    def parameters(self, **kwargs):
-        return reduce(lambda a, b: a + b, [list(i.parameters() for i in self.chains)])
-
-    def to(self, device):
-        for i in range(len(self.chains)):
-            self.chains[i] = self.chainsp[i].to(device)
-
 
 class DenseNet(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels, n_classes):
         super().__init__()
         num_channels = 16
+        blocks = 4
+
         self.layers = torch.nn.Sequential(
             torch.nn.Conv2d(
-                in_channels=1,
+                in_channels=in_channels,
                 out_channels=num_channels,
                 kernel_size=7,
                 stride=1,
                 padding=1
             ),
-            # TODO: Duplicate same thing
-            DenseBlock(in_features=num_channels),
-            TransitionLayer(in_features=num_channels + 4 * num_channels, out_features=num_channels),
+            *[torch.nn.Sequential(
+                DenseBlock(in_features=num_channels, num_chains=4),
+                TransitionLayer(in_features=num_channels + 4 * num_channels, out_features=num_channels)
+            ) for _ in range(blocks - 1)],
 
+            # last DenseBlock is without TransitionLayer, we use Adaptive Pooling
+            DenseBlock(in_features=num_channels, num_chains=4),
+            # before pool do C mean (80 -> 16) with conv
+            torch.nn.Conv2d(
+                in_channels=num_channels + 4 * num_channels,
+                out_channels=num_channels,
+                kernel_size=1,
+                stride=1,
+                padding=0
+            ),
             torch.nn.AdaptiveAvgPool2d(output_size=1),
             Reshape(target_shape=(-1, num_channels)),
-            torch.nn.Linear(in_features=num_channels, out_features=10),
+            torch.nn.Linear(in_features=num_channels, out_features=n_classes),
             torch.nn.Softmax(dim=1)
         )
 
+    def forward(self, x):
+        return self.layers(x)
 
-BATCH_SIZE = 16
-dummy = DenseBlock(in_features=8)
-x = torch.ones((BATCH_SIZE, 8, 28, 28))
-out = dummy.forward(x)
-print(x)
-print(out.shape)
 
-model = None
-# TODO: code after creating model and optimizer
-metrics = {}
-for stage in ['train', 'test']:
-    for metric in ['loss', 'acc']:
-        metrics[f'{stage}_{metric}'] = []
+def test():
+    model = DenseNet(in_channels=1, n_classes=10)
+    summary(model, (1, 28, 28))
+    # test separate NN blocks
+    # dummy = DenseBlock(in_features=8)
+    # x = torch.ones((BATCH_SIZE, 8, 28, 28))
+    # out = dummy.forward(x)
+    # print(x)
+    # print(out.shape)
 
-EPOCHS = 100
-DEVICE = None
 
-train_loader = None
-test_loader = None
+def main():
+    train_loader = torch.utils.data.DataLoader(
+        dataset=DatasetFashionMNIST(is_train=True),
+        batch_size=BATCH_SIZE,
+        shuffle=True
+    )
 
-for epoch in range(EPOCHS):
+    test_loader = torch.utils.data.DataLoader(
+        dataset=DatasetFashionMNIST(is_train=False),
+        batch_size=BATCH_SIZE,
+        shuffle=False
+    )
 
-    # TODO: ?
-    plt.clf()
+    model = DenseNet(in_channels=1, n_classes=10)
+    model = model.to(DEVICE)
 
-    print("\nepoch = ", epoch)
-    for loader in [train_loader, test_loader]:
+    # TODO: check paper optimizer and lr
+    optimizer = Adam(model.parameters(), lr=lr)
+    metrics = {}
+    for stage in ['train', 'test']:
+        for metric in ['loss', 'acc']:
+            metrics[f'{stage}_{metric}'] = []
 
-        metrics_epoch = {key: [] for key in metrics.keys()}
+    for epoch in range(EPOCHS):
+        plt.clf()
+        for loader in [train_loader, test_loader]:
+            metrics_epoch = {key: [] for key in metrics.keys()}
+            if loader == train_loader:
+                stage = "train"
+                model = model.train()
+                torch.set_grad_enabled(True)
+            else:
+                stage = "test"
+                model = model.eval()
+                torch.set_grad_enabled(False)
 
-        if loader == train_loader:
-            print("\n\ttraining:")
-            stage = "train"
-            model = model.train()
-            torch.set_grad_enabled(True)
-        else:
-            print("\n\ttesting:")
-            stage = "test"
-            model = model.eval()
-            torch.set_grad_enabled(False)
+            for x, y in loader:
+                x = x.to(DEVICE)  # (B,C,W,H)
+                y = y.to(DEVICE)  # (B, n_classes)
+                y_prim = model.forward(x)
+                loss = torch.sum(-y*torch.log(y_prim + 1e-8))
+                metrics_epoch[f'{stage}_loss'].append(loss.cpu().item())
 
-        # losses = AverageValueMeter()
+                if loader == train_loader:
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
 
-        for x, y_idx in loader:
-            x = x.to(DEVICE)
-            # y = y.to(DEVICE)
+                np_y_prim = y_prim.cpu().data.numpy()
+                np_y = y.cpu().data.numpy()
+                idx_y = np.argmax(np_y, axis=1)
+                idx_y_prim = np.argmax(np_y_prim, axis=1)
+                acc = np.mean((idx_y == idx_y_prim) * 1.0)
+                metrics_epoch[f'{stage}_acc'].append(acc)
 
-            y_idx = y_idx.to(DEVICE)
-            y_prim = model.forward(x)
+            metrics_strs = []
+            for key in metrics_epoch.keys():
+                if stage in key:
+                    value = np.mean(metrics_epoch[key])
+                    metrics[key].append(value)
+                    metrics_strs.append(f'{key}: {round(value, 2)}')
 
-            # TODO: evalds cross entropy
-            # loss = torch.sum(-y*torch.log(y_prim + 1e-8))
+            print(f'epoch: {epoch} {" ".join(metrics_strs)}')
 
-            # use custom implemented cross-entropy
-            # loss = -torch.mean(torch.log(y_prim + 1e-8)[torch.arange(BATCH_SIZE), y_idx])
-            # print(loss)
+        plt.clf()
+        plts = []
+        c = 0
+        from scipy.ndimage import gaussian_filter1d
+        for key, value in metrics.items():
+            value = gaussian_filter1d(value, sigma=2)
+            plts += plt.plot(value, f'C{c}', label=key)
+            ax = plt.twinx()
+            c += 1
+        plt.legend(plts, [it.get_label() for it in plts])
+        plt.show()
 
-            # TODO: all convertions are done inside of custom dataset
-            # convert label to one-hot encoded
-            y = torch.zeros((x.size(0), 10))
-            y[torch.arange(x.size(0)), y_idx] = 1.0
-            y = y.to(DEVICE)
 
-            # batch loss
-            loss = -torch.mean(y * torch.log(y_prim + 1e-8))
-
-            metrics_epoch[f'{stage}_loss'].append(loss.cpu().item())
-
-            # if loader == train_loader:
-            #     loss.backward()
-            #     optimizer.step()
-            #     optimizer.zero_grad()
-
-            np_y_prim = y_prim.cpu().data.numpy()
-            np_y = y.cpu().data.numpy()
-
-            idx_y = np.argmax(np_y, axis=1)
-            idx_y_prim = np.argmax(np_y_prim, axis=1)
-
-            # TODO: ?
-            acc = np.mean((idx_y == idx_y_prim) * 1.0)
-            metrics_epoch[f'{stage}_acc'].append(acc)
-
-        metrics_strs = []
-        for key in metrics_epoch.keys():
-            if stage in key:
-                value = np.mean(metrics_epoch[key])
-                metrics[key].append(value)
-                # TODO: ?
-                metrics_strs.append(f'{key}: {round(value, 2)}')
-
-        print(f'epoch: {epoch} {" ".join(metrics_strs)}')
-
-    plt.clf()
-    plts = []
-    c = 0
-    for key, value in metrics.items():
-        # TODO:?
-        # value = gaussian_filter1d(value, sigma=2)
-
-        plts += plt.plot(value, f'C{c}', label=key)
-        ax = plt.twinx()
-        c += 1
-
-    plt.legend(plts, [it.get_label() for it in plts])
-    plt.show()
-
-    # # losses.value is average loss of all batches
-    # meters[f'{meter_prefix}_loss'].append(losses.value()[0])
-    # print(losses.value()[0])
+if __name__ == '__main__':
+    # with tf.device('/device:GPU:0'):
+    # test()
+    main()
