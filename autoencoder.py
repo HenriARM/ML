@@ -1,9 +1,6 @@
-# import random
-# import torch.nn.functional as F
 import scipy
 import torch
 import numpy as np
-# import matplotlib
 import torchvision
 import matplotlib.pyplot as plt
 from torchsummary import summary
