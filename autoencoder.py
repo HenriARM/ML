@@ -127,6 +127,8 @@ class AutoEncoder(torch.nn.Module):
         return out
 
 
+
+
 def test():
     model = AutoEncoder()
     summary(model, (1, 28, 28))
@@ -227,4 +229,3 @@ def main():
 if __name__ == '__main__':
     main()
 
-# TODO: use GroupNorm
