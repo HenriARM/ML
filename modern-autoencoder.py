@@ -70,20 +70,56 @@ class DatasetEMNIST(torch.utils.data.Dataset):
 class AutoEncoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
+        channels = [1, 4, 8, 16, 32]
         self.encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels=1, out_channels=4, kernel_size=5, stride=1, padding=0),
-            torch.nn.ReLU(),
-            torch.nn.BatchNorm2d(num_features=4),
+            *[torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=ch_in, out_channels=ch_out, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(negative_slope=0.01),
+                torch.nn.GroupNorm(num_groups=2, num_channels=ch_out),
 
+                torch.nn.Conv2d(in_channels=ch_out, out_channels=ch_out, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(negative_slope=0.01),
+                torch.nn.GroupNorm(num_groups=2, num_channels=ch_out),
+                torch.nn.AvgPool2d(kernel_size=4, stride=2, padding=0)
+            ) for ch_in, ch_out in zip(channels[:-1], channels[1:-1])],
+
+            # last conv block is without pooling
+            torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=channels[-2], out_channels=channels[-1], kernel_size=3, stride=1,
+                                padding=1),
+                torch.nn.LeakyReLU(negative_slope=0.01),
+                torch.nn.GroupNorm(num_groups=2, num_channels=channels[-1]),
+
+                torch.nn.Conv2d(in_channels=channels[-1], out_channels=channels[-1], kernel_size=3, stride=1,
+                                padding=1),
+                torch.nn.LeakyReLU(negative_slope=0.01),
+                torch.nn.GroupNorm(num_groups=2, num_channels=channels[-1]),
+            ),
+            torch.nn.Tanh()
         )
-
+        channels = [32, 32, 16, 8, 4]
         self.decoder = torch.nn.Sequential(
-            torch.nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=4, stride=2, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.BatchNorm2d(num_features=16),
+            *[torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=ch_in, out_channels=ch_out, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(negative_slope=0.01),
+                torch.nn.GroupNorm(num_groups=2, num_channels=ch_out),
 
-            torch.nn.ConvTranspose2d(in_channels=4, out_channels=1, kernel_size=5, stride=1, padding=0),
-            torch.nn.Sigmoid(),
+                torch.nn.Conv2d(in_channels=ch_out, out_channels=ch_out, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(negative_slope=0.01),
+                torch.nn.GroupNorm(num_groups=2, num_channels=ch_out),
+                torch.nn.UpsamplingBilinear2d(scale_factor=2)
+            ) for ch_in, ch_out in zip(channels, channels[1:])],
+
+            # last conv block built different
+            torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=channels[-1], out_channels=channels[-1], kernel_size=3, stride=1,
+                                padding=1),
+                torch.nn.LeakyReLU(negative_slope=0.01),
+                torch.nn.GroupNorm(num_groups=2, num_channels=channels[-1]),
+
+                torch.nn.Conv2d(in_channels=channels[-1], out_channels=1, kernel_size=3, stride=1, padding=1),
+            ),
+            torch.nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -91,7 +127,7 @@ class AutoEncoder(torch.nn.Module):
         z = z.view(-1, 32)
         # PCA
         z = z.view(-1, 32, 1, 1)
-        out = self.decoder.forward(z)
+        out = self.decoder.forward(z) # TODO: (BATCH_SIZE, 1, 16, 16)
         return out
 
 
