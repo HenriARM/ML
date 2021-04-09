@@ -6,7 +6,7 @@ import sys
 import traceback
 import traceback, sys
 import numpy as np
-from file_utils import FileUtils
+from tensorboard.file_utils import FileUtils
 
 
 class CsvUtils2():

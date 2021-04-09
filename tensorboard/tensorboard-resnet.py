@@ -104,6 +104,7 @@ class ResNet(nn.Module):
 
 
 def main():
+    # TODO: add dataset path
     # Use standard FashionMNIST dataset
     train_set = torchvision.datasets.FashionMNIST(
         root='./datasets',

@@ -1,5 +1,5 @@
 import time
-from tensorboard_utills import CustomSummaryWriter
+from tensorboard.tensorboard_utills import CustomSummaryWriter
 import sklearn.datasets
 import argparse
 import torch
