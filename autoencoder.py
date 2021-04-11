@@ -53,11 +53,13 @@ class DatasetEMNIST(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         pil_x, label_idx = self.data[idx]
         np_x = np.array(pil_x)
-        np_x = normalize(np_x)
         np_x = np.expand_dims(np_x, axis=0)
 
-        # Denoising  autoencoder
+        # denoise
         np_x_noise = noise(np_x)
+        # normalize
+        np_x = normalize(np_x)
+
         x = torch.FloatTensor(np_x_noise)
         y = torch.FloatTensor(np_x)
 
