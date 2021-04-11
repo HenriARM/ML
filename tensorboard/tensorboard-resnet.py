@@ -1,3 +1,4 @@
+import numpy as np
 import torchvision
 from torchvision.transforms import transforms
 from torch.utils.data import DataLoader
@@ -12,7 +13,7 @@ import time
 from tensorboard_utills import CustomSummaryWriter
 import argparse
 
-from csv_utils import CsvUtils2
+from csv_utils import CsvUtils
 
 parser = argparse.ArgumentParser(description='Model trainer')
 parser.add_argument('-run_name', default=f'run_{time.time()}', type=str)
@@ -164,13 +165,8 @@ def main():
             if data_loader == data_loader_test:
                 stage = 'test'
                 torch.set_grad_enabled(False)
-            for x, y_idx in loader:
+            for x, y in data_loader:
                 x = x.to(DEVICE)
-                y_idx = y_idx.to(DEVICE)
-
-                # convert label to one-hot encoded
-                y = torch.zeros((x.size(0), 10))
-                y[torch.arange(x.size(0)), y_idx] = 1.0
                 y = y.to(DEVICE)
 
                 y_prim = model.forward(x)
@@ -195,27 +191,28 @@ def main():
                         scalar_value=value,
                         global_step=epoch
                     )
+                    summary_writer.flush()
 
             print(f'epoch: {epoch} {" ".join(metrics_strs)}')
+    summary_writer.close()
 
-            # # TODO: add Acc same as loss
-            #
-            # # TODO
-            # d = {
-            #     'last_train_loss'
-            #     'best_train_loss'
-            #     #     accs other meters for each train/test
-            # }
-            #
-            # summary_writer.add_hparams(
-            #     hparam_dict=args.__dict__,
-            #     metric_dict=d,
-            #     name=args.run_name,
-            #     global_step=epoch
-            # )
-            #
-            # # TODO: run each epoch
-            # CsvUtils2.add_hparams()
+    # # TODO: add Acc same as loss
+    # # TODO
+    # d = {
+    #     'last_train_loss'
+    #     'best_train_loss'
+    #     #     accs other meters for each train/test
+    # }
+    #
+    # summary_writer.add_hparams(
+    #     hparam_dict=args.__dict__,
+    #     metric_dict=d,
+    #     name=args.run_name,
+    #     global_step=epoch
+    # )
+    #
+    # # TODO: run each epoch
+    # CsvUtils2.add_hparams()
 
 
 if __name__ == '__main__':
