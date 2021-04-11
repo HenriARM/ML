@@ -9,7 +9,7 @@ import numpy as np
 from tensorboard.file_utils import FileUtils
 
 
-class CsvUtils2():
+class CsvUtil:
 
     @staticmethod
     def create_global(path_sequence):
