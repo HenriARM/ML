@@ -12,7 +12,6 @@ parser.add_argument('-sequence_name', default=f'seq_default', type=str)
 parser.add_argument('-learning_rate', default=1e-3, type=float)
 parser.add_argument('-batch_size', default=32, type=int)
 parser.add_argument('-epochs', default=10, type=int)
-# TODO: use action
 # parser.add_argument('-is_cuda', default=False, action="store_true")
 parser.add_argument('-is_cuda', default=False, type=lambda x: (str(x).lower() == 'true'))
 args = parser.parse_args()
@@ -27,14 +26,14 @@ for epoch in range(1, args.epochs + 1):
     train_loss = -np.log(epoch / (args.epochs + 2))
     summary_writer.add_scalar(
         tag='train_loss',
-        scalar_value=train_loss,  # TODO replace value
+        scalar_value=train_loss,
         global_step=epoch
     )
 
     acc = np.log(epoch) / np.log(args.epochs + 1)
     summary_writer.add_scalar(
         tag='train_acc',
-        scalar_value=acc,  # TODO replace value
+        scalar_value=acc,
         global_step=epoch
     )
 
