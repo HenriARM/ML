@@ -6,7 +6,6 @@ from torch.nn.functional import pad, softmax
 from torchsummary import summary
 
 import torch
-from torch.optim import Adam
 from torchnet.meter import AverageValueMeter
 
 import time
@@ -33,7 +32,7 @@ if torch.cuda.is_available() and args.is_cuda:
 
 EPOCHS = args.epochs
 BATCH_SIZE = args.batch_size
-lr = args.learning_rate
+LEARNING_RATE = args.learning_rate
 
 summary_writer = CustomSummaryWriter(
     logdir=f'{args.sequence_name}/{args.run_name}'
@@ -136,13 +135,13 @@ class ResNet(nn.Module):
 
 
 def main():
-    train_loader = torch.utils.data.DataLoader(
+    data_loader_train = torch.utils.data.DataLoader(
         dataset=DatasetFashionMNIST(is_train=True, dataset_path=args.dataset_path),
         batch_size=BATCH_SIZE,
         shuffle=True
     )
 
-    test_loader = torch.utils.data.DataLoader(
+    data_loader_test = torch.utils.data.DataLoader(
         dataset=DatasetFashionMNIST(is_train=False, dataset_path=args.dataset_path),
         batch_size=BATCH_SIZE,
         shuffle=False
@@ -150,62 +149,54 @@ def main():
 
     model = ResNet(in_channels=1, n_classes=10)
     model = model.to(DEVICE)
-    summary(model, (1, 28, 28))
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-    optimizer = Adam(model.parameters(), lr=lr)
-    meters: dict = {
-        'train_loss': [],
-        'test_loss': []
-    }
+    metrics = {}
+    for stage in ['train', 'test']:
+        for metric in ['loss']:
+            metrics[f'{stage}_{metric}'] = []
+
     for epoch in range(EPOCHS):
-        for loader in [train_loader, test_loader]:
-            if loader == train_loader:
-                meter_prefix = "train"
-                model = model.train()
-                torch.set_grad_enabled(True)
-            else:
-                meter_prefix = "test"
-                model = model.eval()
+        for data_loader in [data_loader_train, data_loader_test]:
+            metrics_epoch = {key: [] for key in metrics.keys()}
+            stage = 'train'
+            torch.set_grad_enabled(True)
+            if data_loader == data_loader_test:
+                stage = 'test'
                 torch.set_grad_enabled(False)
-
-            losses = AverageValueMeter()
             for x, y_idx in loader:
-                # if losses.n > 10:
-                #     break
-
                 x = x.to(DEVICE)
                 y_idx = y_idx.to(DEVICE)
-                y_prim = model.forward(x)
-
-                # use custom implemented cross-entropy
-                # loss = -torch.mean(torch.log(y_prim + 1e-8)[torch.arange(BATCH_SIZE), y_idx])
-                # print(loss)
 
                 # convert label to one-hot encoded
                 y = torch.zeros((x.size(0), 10))
                 y[torch.arange(x.size(0)), y_idx] = 1.0
                 y = y.to(DEVICE)
 
-                # batch loss
+                y_prim = model.forward(x)
                 loss = -torch.mean(y * torch.log(y_prim + 1e-8))
+                metrics_epoch[f'{stage}_loss'].append(loss.cpu().item())  # Tensor(0.1) => 0.1f
 
-                # loss.to('cpu').item() => single scalar value
-                # loss.to('cpu').data.numpy() => matrix
-                losses.add(loss.to(DEVICE).item())
-
-                if loader == train_loader:
+                if data_loader == data_loader_train:
                     loss.backward()
                     optimizer.step()
                     optimizer.zero_grad()
 
-            # losses.value is average loss of all batches
-            meters[f'{meter_prefix}_loss'].append(losses.value()[0])
+            metrics_strs = []
+            for key in metrics_epoch.keys():
+                if stage in key:
+                    value = np.mean(metrics_epoch[key])
+                    metrics[key].append(value)
+                    metrics_strs.append(f'{key}: {round(value, 2)}')
 
-            # summary_writer.add_scalar(
-            #     tag=f'{meter_prefix}_loss',
-            #     scalar_value=losses.value()[0],
-            #     global_step=epoch
-            # )
+                    # add each scalar metric per epoch
+                    summary_writer.add_scalar(
+                        tag=key,
+                        scalar_value=value,
+                        global_step=epoch
+                    )
+
+            print(f'epoch: {epoch} {" ".join(metrics_strs)}')
 
             # # TODO: add Acc same as loss
             #
