@@ -6,10 +6,10 @@ import sys
 import traceback
 import traceback, sys
 import numpy as np
-from tensorboard.file_utils import FileUtils
+from file_utils import FileUtils
 
 
-class CsvUtil:
+class CsvUtils:
 
     @staticmethod
     def create_global(path_sequence):
