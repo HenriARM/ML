@@ -13,6 +13,8 @@ import time
 from tensorboard_utills import CustomSummaryWriter
 import argparse
 
+from csv_utils import CsvUtils2
+
 parser = argparse.ArgumentParser(description='Model trainer')
 parser.add_argument('-run_name', default=f'run_{time.time()}', type=str)
 parser.add_argument('-sequence_name', default=f'seq-resnet', type=str)
@@ -20,11 +22,14 @@ parser.add_argument('-learning_rate', default=1e-3, type=float)
 parser.add_argument('-batch_size', default=64, type=int)
 parser.add_argument('-epochs', default=10, type=int)
 parser.add_argument('-is_cuda', default=False, type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-dataset_path', default=f'./datasets', type=str)
 args = parser.parse_args()
 
+MAX_LEN = 200  # limit max number of samples otherwise too slow training (on GPU use all samples / for final training
 DEVICE = 'cpu'
 if torch.cuda.is_available() and args.is_cuda:
     DEVICE = 'cuda'
+    MAX_LEN = 0
 
 EPOCHS = args.epochs
 BATCH_SIZE = args.batch_size
@@ -33,6 +38,33 @@ lr = args.learning_rate
 summary_writer = CustomSummaryWriter(
     logdir=f'{args.sequence_name}/{args.run_name}'
 )
+
+
+class DatasetFashionMNIST(torch.utils.data.Dataset):
+    def __init__(self, is_train, dataset_path):
+        super().__init__()
+        self.data = torchvision.datasets.FashionMNIST(
+            root=dataset_path,
+            train=is_train,
+            download=True
+        )
+
+    def __len__(self):
+        # len is called before iterating data loader
+        if MAX_LEN:
+            return MAX_LEN
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        # PIL image is returned
+        pil_x, y_idx = self.data[idx]
+        np_x = np.array(pil_x)
+        np_x = np.expand_dims(np_x, axis=0)  # (1, W, H)
+        np_y = np.zeros((10,))
+        np_y[y_idx] = 1.0
+        # type(torch.tensor(np_x)) - <class 'torch.Tensor'>, torch.tensor(np_x).dtype - torch.uint8
+        # type(torch.FloatTensor(np_x)) - <class 'torch.Tensor'>, torch.FloatTensor(np_x).dtype - torch.float32
+        return torch.FloatTensor(np_x), torch.FloatTensor(np_y)
 
 
 def conv_3x3(in_channels, out_channels):
@@ -104,24 +136,17 @@ class ResNet(nn.Module):
 
 
 def main():
-    # TODO: add dataset path
-    # Use standard FashionMNIST dataset
-    train_set = torchvision.datasets.FashionMNIST(
-        root='./datasets',
-        train=True,
-        download=True,
-        transform=transforms.Compose([transforms.ToTensor()])
+    train_loader = torch.utils.data.DataLoader(
+        dataset=DatasetFashionMNIST(is_train=True, dataset_path=args.dataset_path),
+        batch_size=BATCH_SIZE,
+        shuffle=True
     )
 
-    test_set = torchvision.datasets.FashionMNIST(
-        root='./datasets',
-        train=False,
-        download=True,
-        transform=transforms.Compose([transforms.ToTensor()])
+    test_loader = torch.utils.data.DataLoader(
+        dataset=DatasetFashionMNIST(is_train=False, dataset_path=args.dataset_path),
+        batch_size=BATCH_SIZE,
+        shuffle=False
     )
-
-    train_loader = DataLoader(dataset=train_set, batch_size=BATCH_SIZE, shuffle=True)
-    test_loader = DataLoader(dataset=test_set, batch_size=BATCH_SIZE, shuffle=False)
 
     model = ResNet(in_channels=1, n_classes=10)
     model = model.to(DEVICE)
@@ -133,15 +158,12 @@ def main():
         'test_loss': []
     }
     for epoch in range(EPOCHS):
-        print("\nepoch = ", epoch)
         for loader in [train_loader, test_loader]:
             if loader == train_loader:
-                print("\n\ttraining:")
                 meter_prefix = "train"
                 model = model.train()
                 torch.set_grad_enabled(True)
             else:
-                print("\n\ttesting:")
                 meter_prefix = "test"
                 model = model.eval()
                 torch.set_grad_enabled(False)
@@ -178,8 +200,31 @@ def main():
 
             # losses.value is average loss of all batches
             meters[f'{meter_prefix}_loss'].append(losses.value()[0])
-            print(losses.value()[0])
-    print(meters)
+
+            # summary_writer.add_scalar(
+            #     tag=f'{meter_prefix}_loss',
+            #     scalar_value=losses.value()[0],
+            #     global_step=epoch
+            # )
+
+            # # TODO: add Acc same as loss
+            #
+            # # TODO
+            # d = {
+            #     'last_train_loss'
+            #     'best_train_loss'
+            #     #     accs other meters for each train/test
+            # }
+            #
+            # summary_writer.add_hparams(
+            #     hparam_dict=args.__dict__,
+            #     metric_dict=d,
+            #     name=args.run_name,
+            #     global_step=epoch
+            # )
+            #
+            # # TODO: run each epoch
+            # CsvUtils2.add_hparams()
 
 
 if __name__ == '__main__':
