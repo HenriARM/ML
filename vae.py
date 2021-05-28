@@ -28,45 +28,69 @@ INCLUDE_CLASSES = []  # empty include all
 # Link to dataset if download not working
 # http://www.itl.nist.gov/iaui/vip/cs_links/EMNIST/gzip.zip to ../data/EMNIST/raw/emnist.zip
 
-class DatasetEMNIST(torch.utils.data.Dataset):
+class DatasetCustom(torch.utils.data.Dataset):
     def __init__(self, is_train):
-        self.data = torchvision.datasets.EMNIST(
+
+        data_tmp = torchvision.datasets.MNIST(
             root='../data',
             train=is_train,
-            split='byclass',
+            # split='byclass',
             download=True
         )
+
+        global INCLUDE_CLASSES
+        if len(INCLUDE_CLASSES) == 0:
+            INCLUDE_CLASSES = np.arange(len(data_tmp.classes)).tolist()
+
+        self.data = []
+        for x, y_idx in data_tmp:
+            if y_idx in INCLUDE_CLASSES:
+                self.data.append((x, y_idx))
 
     def __len__(self):
         if MAX_LEN:
             return MAX_LEN
         return len(self.data)
 
-    def normalize(self, x):
-        x_min = np.min(x)
-        x_max = np.max(x)
-        if x_min == x_max or x_max == 0:
-            return x
-        return (x - x_min) / (x_max - x_min)
+    def normalize(self, data):
+        data_max = data.max()
+        data_min = data.min()
+        if data_min != data_max:
+            data = ((data - data_min) / (data_max - data_min))
+        return data
 
     def __getitem__(self, idx):
-        pil_x, label_idx = self.data[idx]
-        np_x = np.array(pil_x)  # (28, 28)
+        pil_y, label_idx = self.data[idx]
+        np_y = np.array(pil_y).transpose()  # (28, 28)
+
+        if NOISINESS > 0:
+            noise = np.random.rand(*np_y.shape)
+            np_x = np.where(noise < NOISINESS, 0, np_y)
+        else:
+            np_x = np.array(np_y)
+
+        np_y = np.expand_dims(np_y, axis=0)  # (C, W, H)
+        np_y = self.normalize(np_y)
+        y = torch.FloatTensor(np_y)
+
         np_x = np.expand_dims(np_x, axis=0)  # (C, W, H)
         np_x = self.normalize(np_x)
         x = torch.FloatTensor(np_x)
 
-        return x
+        label = np.zeros((len(INCLUDE_CLASSES),))
+        label[label_idx] = 1.0
+        label = torch.FloatTensor(label)
+        return x, y, label
 
 
 data_loader_train = torch.utils.data.DataLoader(
-    dataset=DatasetEMNIST(is_train=True),
+    dataset=DatasetCustom(is_train=True),
     batch_size=BATCH_SIZE,
     shuffle=True,
     drop_last=True
 )
 data_loader_test = torch.utils.data.DataLoader(
-    dataset=DatasetEMNIST(is_train=False),
+    dataset=DatasetCustom(is_train=False),
     batch_size=BATCH_SIZE,
     shuffle=False,
     drop_last=True
