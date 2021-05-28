@@ -83,20 +83,6 @@ class DatasetCustom(torch.utils.data.Dataset):
         return x, y, label
 
 
-data_loader_train = torch.utils.data.DataLoader(
-    dataset=DatasetCustom(is_train=True),
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    drop_last=True
-)
-data_loader_test = torch.utils.data.DataLoader(
-    dataset=DatasetCustom(is_train=False),
-    batch_size=BATCH_SIZE,
-    shuffle=False,
-    drop_last=True
-)
-
-
 class VAE(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -168,86 +154,105 @@ class VAE(torch.nn.Module):
         return y_prim, z, z_sigma, z_mu
 
 
-model = VAE()
-dummy = torch.randn((32, 1, 28, 28))
-y = model.forward(dummy)
+def main():
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset=DatasetCustom(is_train=True),
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        drop_last=True
+    )
+    data_loader_test = torch.utils.data.DataLoader(
+        dataset=DatasetCustom(is_train=False),
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        drop_last=True
+    )
 
-loss_func = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    model = VAE()
+    dummy = torch.randn((32, 1, 28, 28))
+    y = model.forward(dummy)
 
-model = model.to(DEVICE)
+    loss_func = torch.nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-metrics = {}
-for stage in ['train', 'test']:
-    for metric in [
-        'loss, loss_rec, loss_kl'
-    ]:
-        metrics[f'{stage}_{metric}'] = []
+    model = model.to(DEVICE)
 
-for epoch in range(1, 100):
+    metrics = {}
+    for stage in ['train', 'test']:
+        for metric in [
+            'loss, loss_rec, loss_kl'
+        ]:
+            metrics[f'{stage}_{metric}'] = []
 
-    for data_loader in [data_loader_train, data_loader_test]:
-        metrics_epoch = {key: [] for key in metrics.keys()}
+    for epoch in range(1, 100):
 
-        stage = 'train'
-        if data_loader == data_loader_test:
-            stage = 'test'
+        for data_loader in [data_loader_train, data_loader_test]:
+            metrics_epoch = {key: [] for key in metrics.keys()}
 
-        for x in data_loader:
+            stage = 'train'
+            if data_loader == data_loader_test:
+                stage = 'test'
 
-            x = x.to(DEVICE)
-            y = y.to(DEVICE)
+            for x in data_loader:
 
-            model = model.train()
+                x = x.to(DEVICE)
+                y = y.to(DEVICE)
 
-            y_prim, z, z_sigma, z_mu = model.forward(x)
-            loss = 0
-            # TODO loss function
+                model = model.train()
 
-            loss_rec = torch.mean((y_prim - y) ** 2)
-            loss_kl = torch.mean(
-                VAE_BETA * torch.mean(-0.5 * (2 * torch.log(z_sigma + 1e-8) - z_sigma - z_mu ** 2 + 1), axis=0))
-            loss = loss_rec + loss_kl
+                y_prim, z, z_sigma, z_mu = model.forward(x)
+                loss = 0
+                # TODO loss function
 
-            # TODO: add to others
-            metrics_epoch[f'{stage}_loss'].append(loss.cpu().item())  # Tensor(0.1) => 0.1f
+                loss_rec = torch.mean((y_prim - y) ** 2)
+                loss_kl = torch.mean(
+                    VAE_BETA * torch.mean(-0.5 * (2 * torch.log(z_sigma + 1e-8) - z_sigma - z_mu ** 2 + 1), axis=0))
+                loss = loss_rec + loss_kl
 
-            if data_loader == data_loader_train:
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
+                # TODO: add to others
+                metrics_epoch[f'{stage}_loss'].append(loss.cpu().item())  # Tensor(0.1) => 0.1f
 
-            np_y_prim = y_prim.cpu().data.numpy()
+                if data_loader == data_loader_train:
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
 
-            # TODO save model at best loss
+                np_y_prim = y_prim.cpu().data.numpy()
 
-        metrics_strs = []
-        for key in metrics_epoch.keys():
-            if stage in key:
-                value = np.mean(metrics_epoch[key])
-                metrics[key].append(value)
-                metrics_strs.append(f'{key}: {round(value, 2)}')
+                # TODO save model at best loss
 
-        print(f'epoch: {epoch} {" ".join(metrics_strs)}')
+            metrics_strs = []
+            for key in metrics_epoch.keys():
+                if stage in key:
+                    value = np.mean(metrics_epoch[key])
+                    metrics[key].append(value)
+                    metrics_strs.append(f'{key}: {round(value, 2)}')
 
-    plt.subplot(121)  # row col idx
-    plts = []
-    c = 0
-    for key, value in metrics.items():
-        value = scipy.ndimage.gaussian_filter1d(value, sigma=2)
+            print(f'epoch: {epoch} {" ".join(metrics_strs)}')
 
-        plts += plt.plot(value, f'C{c}', label=key)
-        ax = plt.twinx()
-        c += 1
+        plt.subplot(121)  # row col idx
+        plts = []
+        c = 0
+        for key, value in metrics.items():
+            value = scipy.ndimage.gaussian_filter1d(value, sigma=2)
 
-    plt.legend(plts, [it.get_label() for it in plts])
+            plts += plt.plot(value, f'C{c}', label=key)
+            ax = plt.twinx()
+            c += 1
 
-    for i, j in enumerate([4, 5, 6, 16, 17, 18]):
-        plt.subplot(4, 6, j)
-        plt.imshow(x[i][0].T, cmap=plt.get_cmap('Greys'))
+        plt.legend(plts, [it.get_label() for it in plts])
 
-        plt.subplot(4, 6, j + 6)
-        plt.imshow(np_y_prim[i][0].T, cmap=plt.get_cmap('Greys'))
+        for i, j in enumerate([4, 5, 6, 16, 17, 18]):
+            plt.subplot(4, 6, j)
+            plt.imshow(x[i][0].T, cmap=plt.get_cmap('Greys'))
 
-    plt.tight_layout(pad=0.5)
-    plt.show()
+            plt.subplot(4, 6, j + 6)
+            plt.imshow(np_y_prim[i][0].T, cmap=plt.get_cmap('Greys'))
+
+        plt.tight_layout(pad=0.5)
+        plt.show()
+
+
+
+if __name__ == '__main__':
+    main()
