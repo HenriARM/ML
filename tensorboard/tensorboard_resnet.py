@@ -24,7 +24,7 @@ parser.add_argument('--learning_rate', default=1e-3, type=float)
 parser.add_argument('--batch_size', default=64, type=int)
 parser.add_argument('--epochs', default=10, type=int)
 parser.add_argument('--is_cuda', default=False, type=lambda x: (str(x).lower() == 'true'))
-parser.add_argument('--is_csv', default=False, type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('--is_csv', default=True, type=lambda x: (str(x).lower() == 'true'))
 parser.add_argument('--dataset_path', default=f'./datasets', type=str)
 args = parser.parse_args()
 
@@ -41,6 +41,14 @@ LEARNING_RATE = args.learning_rate
 summary_writer = CustomSummaryWriter(
     logdir=f'{args.sequence_name}/{args.run_name}'
 )
+
+
+def acc(y_prim, y):
+    np_y_prim = y_prim.cpu().data.numpy()
+    np_y = y.cpu().data.numpy()
+    idx_y = np.argmax(np_y, axis=1)
+    idx_y_prim = np.argmax(np_y_prim, axis=1)
+    return np.mean((idx_y == idx_y_prim) * 1.0)
 
 
 class DatasetFashionMNIST(torch.utils.data.Dataset):
@@ -89,57 +97,44 @@ def main():
 
     metrics = {}
     for stage in ['train', 'test']:
-        for metric in ['loss']:
+        for metric in ['loss', 'acc']:
             metrics[f'{stage}_{metric}'] = []
 
     for epoch in range(EPOCHS):
+        metrics_epoch = {key: [] for key in metrics.keys()}
         for data_loader in [data_loader_train, data_loader_test]:
-            metrics_epoch = {key: [] for key in metrics.keys()}
             stage = 'train'
             torch.set_grad_enabled(True)
             if data_loader == data_loader_test:
                 stage = 'test'
                 torch.set_grad_enabled(False)
+
+            # inference
             for x, y in data_loader:
                 x = x.to(DEVICE)
                 y = y.to(DEVICE)
-
                 y_prim = model.forward(x)
                 loss = -torch.mean(y * torch.log(y_prim + 1e-8))
-                metrics_epoch[f'{stage}_loss'].append(loss.cpu().item())  # Tensor(0.1) => 0.1f
-
                 if data_loader == data_loader_train:
                     loss.backward()
                     optimizer.step()
                     optimizer.zero_grad()
+                # calculate metrics per batch
+                metrics_epoch[f'{stage}_loss'].append(loss.cpu().item())  # Tensor(0.1) => 0.1f
+                metrics_epoch[f'{stage}_acc'].append(acc(y_prim, y))
 
-            metrics_strs = []
-            for key in metrics_epoch.keys():
-                if stage in key:
-                    value = np.mean(metrics_epoch[key])
-                    metrics[key].append(value)
-                    metrics_strs.append(f'{key}: {round(value, 2)}')
+        # calculate metrics per epoch
+        metrics_epoch_str = []
+        for key in metrics_epoch.keys():
+            metrics_epoch[key] = np.mean(metrics_epoch[key])
+            metrics_epoch_str.append(f'{key}: {round(metrics_epoch[key], 2)}')
+        summary_writer.flush()
+        print(f'epoch: {epoch} {" ".join(metrics_epoch_str)}')
 
-                    # add each scalar metric per epoch
-                    summary_writer.add_scalar(
-                        tag=key,
-                        scalar_value=value,
-                        global_step=epoch
-                    )
-                    summary_writer.flush()
-
-            print(f'epoch: {epoch} {" ".join(metrics_strs)}')
-
-        # TODO: add Acc same as loss
-        metric_dict = {
-            'last_train_loss': 0,
-            'best_train_loss': 0
-            #     accs other meters for each train/test (merge together)
-            # TODO: print merged metrics too
-        }
+        # add hparams
         summary_writer.add_hparams(
             hparam_dict=args.__dict__,
-            metric_dict=metric_dict,
+            metric_dict=metrics_epoch,
             name=args.run_name,
             global_step=epoch
         )
@@ -149,9 +144,13 @@ def main():
                 sequence_name=args.sequence_name,
                 run_name=args.run_name,
                 args_dict=args.__dict__,
-                metrics_dict=metric_dict,
+                metrics_dict=metrics_epoch,
                 global_step=epoch
             )
+        # append metrics per epoch to global metrics
+        for key in metrics_epoch.keys():
+            metrics[key].append(metrics_epoch[key])
+        summary_writer.flush()
     summary_writer.close()
 
 
