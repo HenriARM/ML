@@ -1,3 +1,6 @@
+"""
+Modern Autoencoder
+"""
 import scipy
 import torch
 import numpy as np
