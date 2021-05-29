@@ -166,5 +166,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # with tf.device('/device:GPU:0'):
     main()
