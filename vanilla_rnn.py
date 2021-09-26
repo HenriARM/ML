@@ -1,4 +1,3 @@
-
 import json
 import os
 import torch
@@ -12,7 +11,7 @@ import torch.utils.data
 from nltk.tokenize import sent_tokenize, word_tokenize
 import nltk
 
-#nltk.download() #downlaod punkt manualy
+# nltk.download() #downlaod punkt manualy
 
 BATCH_SIZE = 128
 EPOCHS = 100
@@ -30,7 +29,7 @@ if torch.cuda.is_available():
 
 MIN_SENTENCE_LEN = 3
 MAX_SENTENCE_LEN = 20
-MAX_LEN = 200 # limit max number of samples otherwise too slow training (on GPU use all samples / for final training)
+MAX_LEN = 200  # limit max number of samples otherwise too slow training (on GPU use all samples / for final training)
 if DEVICE == 'cuda':
     MAX_LEN = 10000
 
@@ -115,7 +114,7 @@ class DatasetCustom(torch.utils.data.Dataset):
 torch.manual_seed(0)
 dataset_full = DatasetCustom()
 dataset_train, dataset_test = torch.utils.data.random_split(
-    dataset_full, lengths=[int(len(dataset_full)*0.8), len(dataset_full)-int(len(dataset_full)*0.8)])
+    dataset_full, lengths=[int(len(dataset_full) * 0.8), len(dataset_full) - int(len(dataset_full) * 0.8)])
 torch.seed()
 
 data_loader_train = torch.utils.data.DataLoader(
@@ -129,25 +128,75 @@ data_loader_test = torch.utils.data.DataLoader(
     shuffle=False
 )
 
+
 class RNNCell(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, input_size, hidden_size):
         super().__init__()
-        #TODO
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        stdv = 1 / math.sqrt(hidden_size)
+        self.W_x = torch.nn.Parameter(torch.FloatTensor(input_size, hidden_size).uniform_(stdv, -stdv))
+        self.W_h = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(stdv, -stdv))
+        self.b = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
 
     def forward(self, x: PackedSequence, hidden=None):
-        #TODO
-        return hidden
+        h_out = []
+
+        # convert from optimal seq data layout to zero padded version
+        x_unpacked, lengths = pad_packed_sequence(x, batch_first=True)
+        batch_size = x_unpacked.size(0)
+        if hidden is None:
+            hidden = torch.FloatTensor(batch_size, self.hidden_size).zero_().to(DEVICE)  # (B, H)
+
+        # x_unpacked.size() => (B, Seq, input_size)
+        x_seq = x_unpacked.permute(1, 0, 2)  # => (Seq, B, input_size)
+        # not optimal, because calculate lengths also for parts that should not be included
+        for x_t in x_seq:
+            # x_t.size() => (B, input_size)
+            # Vanilla RNN
+            hidden = torch.tanh(x_t @ self.W_x + hidden @ self.W_h + self.b)
+            h_out.append(hidden)
+        t_h_out = torch.stack(h_out)
+        t_h_out = t_h_out.permute(1, 0, 2)  # => (B, Seq, input_size)
+        t_h_packed = pack_padded_sequence(t_h_out, lengths, batch_first=True)
+        return t_h_packed
 
 
 class Model(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        #TODO
+        self.embeddings = torch.nn.Embedding(
+            num_embeddings=dataset_full.max_classes_tokens,
+            embedding_dim=RNN_HIDDEN_SIZE
+        )
+        layers = []
+        for _ in range(RNN_LAYERS):
+            layers.append(RNNCell(
+                input_size=RNN_HIDDEN_SIZE,
+                hidden_size=RNN_HIDDEN_SIZE
+            ))
+        self.rnn = torch.nn.Sequential(*layers)
 
     def forward(self, x: PackedSequence, hidden=None):
+        # x.shape (B, Seq, Classes_of_words) => x.shape (B, Seq) every sample is idx of class
+        x_idxes = x.data.argmax(dim=1)
+        embs = self.embeddings.forward(x_idxes)
+        embs_seq = PackedSequence(
+            data=embs,
+            batch_sizes=x.batch_sizes,
+            sorted_indices=x.sorted_indices
+        )
+        hidden = self.rnn.forward(embs_seq)
+        y_prim_logits = hidden.data @ self.embeddings.weight.t()
+        # y_prim_logits.shape = (B*Seq, F)
+        y_prim = torch.softmax(y_prim_logits, dim=1)
+        y_prim_packed = PackedSequence(
+            data=y_prim,
+            batch_sizes=x.batch_sizes,
+            sorted_indices=x.sorted_indices
+        )
+        return y_prim_packed, hidden
 
-        #TODO
-        return y_prim _packed, hidden
 
 model = Model()
 model = model.to(DEVICE)
@@ -162,8 +211,7 @@ for stage in ['train', 'test']:
     ]:
         metrics[f'{stage}_{metric}'] = []
 
-for epoch in range(1, EPOCHS+1):
-
+for epoch in range(1, EPOCHS + 1):
 
     for data_loader in [data_loader_train, data_loader_test]:
         metrics_epoch = {key: [] for key in metrics.keys()}
@@ -191,7 +239,7 @@ for epoch in range(1, EPOCHS+1):
             weights = weights.unsqueeze(dim=1).to(DEVICE)
             loss = -torch.mean(weights * y_packed.data * torch.log(y_prim_packed.data + 1e-8))
 
-            metrics_epoch[f'{stage}_loss'].append(loss.item()) # Tensor(0.1) => 0.1f
+            metrics_epoch[f'{stage}_loss'].append(loss.item())  # Tensor(0.1) => 0.1f
 
             if data_loader == data_loader_train:
                 loss.backward()
@@ -222,18 +270,18 @@ for epoch in range(1, EPOCHS+1):
 
     print('Examples:')
     y_prim_unpacked, lengths_unpacked = pad_packed_sequence(y_prim_packed.cpu(), batch_first=True)
-    y_prim_unpacked = y_prim_unpacked[:5] # 5 examples
+    y_prim_unpacked = y_prim_unpacked[:5]  # 5 examples
     for idx, each in enumerate(y_prim_unpacked):
         length = lengths_unpacked[idx]
 
         y_prim_idxes = np.argmax(each[:length].data.numpy(), axis=1).tolist()
         x_idxes = np.argmax(x[idx, :length].cpu().data.numpy(), axis=1).tolist()
         y_prim_idxes = [x_idxes[0]] + y_prim_idxes
-        print('x     : ' +' '.join([dataset_full.idxes_to_words[it] for it in x_idxes]))
-        print('y_prim: ' +' '.join([dataset_full.idxes_to_words[it] for it in y_prim_idxes]))
+        print('x     : ' + ' '.join([dataset_full.idxes_to_words[it] for it in x_idxes]))
+        print('y_prim: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_prim_idxes]))
         print('')
 
-    plt.figure(figsize=(12,5))
+    plt.figure(figsize=(12, 5))
     plts = []
     c = 0
     for key, value in metrics.items():
