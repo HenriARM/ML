@@ -160,8 +160,18 @@ class RNNCell(torch.nn.Module):
 
         # x_unpacked.size() => (B, Seq, input_size)
         x_seq = x_unpacked.permute(1, 0, 2)  # => (Seq, B, input_size)
-        # TODO: not optimal, because calculate lengths also for parts that should not be included
-        # TODO: do hidden calculation with trimmed input and pad after stacking?
+
+        # TODO: idea - trim x_t zeros and padd results on output
+        '''
+        for x_t in x_seq:
+            x_t_trimmed = np.trim_zeros(x_t)
+            # TODO: trim hidden also
+            hidden = torch.tanh(x_t @ self.W_x + hidden @ self.W_h + self.b)
+            h_out.append(hidden)
+        '''
+        # TODO: idea - go seq by seq and then stack into batch outs
+        # TODO: idea - override matrix multiplication function with ignoring 0 calculations (problems with parallel)
+
         for x_t in x_seq:
             # x_t.size() => (B, input_size)
             # Vanilla RNN
@@ -188,7 +198,7 @@ class Model(torch.nn.Module):
             hidden_size=RNN_HIDDEN_SIZE
         )]
         # RNN internall cells
-        for _ in range(RNN_LAYERS-2):
+        for _ in range(RNN_LAYERS - 2):
             layers.append(RNNCell(
                 input_size=RNN_HIDDEN_SIZE,
                 hidden_size=RNN_HIDDEN_SIZE
