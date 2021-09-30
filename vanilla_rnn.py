@@ -1,5 +1,6 @@
 import json
 import os
+import math
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,8 +18,9 @@ BATCH_SIZE = 128
 EPOCHS = 100
 LEARNING_RATE = 1e-3
 
-RNN_HIDDEN_SIZE = 256
-RNN_LAYERS = 2
+RNN_INPUT_SIZE = 256
+RNN_HIDDEN_SIZE = 512
+RNN_LAYERS = 3
 RNN_DROPOUT = 0.3
 
 run_path = ''
@@ -33,8 +35,8 @@ MAX_LEN = 200  # limit max number of samples otherwise too slow training (on GPU
 if DEVICE == 'cuda':
     MAX_LEN = 10000
 
-PATH_DATA = '../data'
-os.makedirs('./results', exist_ok=True)
+PATH_DATA = './data'
+os.makedirs('./old-results-corrupted', exist_ok=True)
 os.makedirs(PATH_DATA, exist_ok=True)
 
 
@@ -46,7 +48,7 @@ class DatasetCustom(torch.utils.data.Dataset):
             data_json = json.load(fp)
 
         self.sentences = []
-        self.lengths = []
+        self.lengths = []  # lengths of all sentences
         self.words_to_idxes = {}
         self.words_counts = {}
         self.idxes_to_words = {}
@@ -73,17 +75,17 @@ class DatasetCustom(torch.utils.data.Dataset):
             if MAX_LEN is not None and len(self.sentences) > MAX_LEN:
                 break
 
-        self.max_length = np.max(self.lengths) + 1
+        self.max_length = np.max(self.lengths) + 1  # longest sentence length + 1
 
         self.end_token = '[END]'
         self.words_to_idxes[self.end_token] = len(self.words_to_idxes)
         self.idxes_to_words[self.words_to_idxes[self.end_token]] = self.end_token
         self.words_counts[self.end_token] = len(self.sentences)
 
-        self.max_classes_tokens = len(self.words_to_idxes)
+        self.max_classes_tokens = len(self.words_to_idxes)  # unique words amount
 
         word_counts = np.array(list(self.words_counts.values()))
-        self.weights = (1.0 / word_counts) * np.sum(word_counts) * 0.5
+        self.weights = (1.0 / word_counts) * np.sum(word_counts) * 0.5  # more frequent word == smaller weight
 
         print(f'self.sentences: {len(self.sentences)}')
         print(f'self.max_length: {self.max_length}')
@@ -93,9 +95,14 @@ class DatasetCustom(torch.utils.data.Dataset):
         samples = np.random.choice(self.sentences, 5)
         for each in samples:
             print(' '.join([self.idxes_to_words[it] for it in each]))
+        # nltk.FreqDist(token), token = ['asa', 'ad', 'asasccsa'] or maybe send idxs?
+        # ' '.join([self.idxes_to_words[it] for it in self.sentences[0]])
         # TODO placeholder to replace rare words
+        # freq_dist = nltk.FreqDist(token)
+        # rarewords = freq_dist.keys()[-50:]
+        # after_rare_words = [word for word in token not in rarewords]
         # TODO remove punctuation
-        # TODO histogtam of words_counts
+        # TODO histogtam of words_counts TODO: nltk.FreqDist, words is on x axis
 
     def __len__(self):
         return len(self.sentences)
@@ -105,12 +112,14 @@ class DatasetCustom(torch.utils.data.Dataset):
         np_x_padded = np.zeros((self.max_length, self.max_classes_tokens))
         np_x_padded[np.arange(len(np_x_idxes)), np_x_idxes] = 1.0
 
+        # word hot-encoding shifts up (first word goes to the end, second to first)
         np_y_padded = np.roll(np_x_padded, shift=-1, axis=0)
         np_length = self.lengths[idx]
 
         return np_x_padded, np_y_padded, np_length
 
 
+# TODO: explain seed
 torch.manual_seed(0)
 dataset_full = DatasetCustom()
 dataset_train, dataset_test = torch.utils.data.random_split(
@@ -134,9 +143,10 @@ class RNNCell(torch.nn.Module):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
+        # TODO: why not sqrt(hidden_size **2)?
         stdv = 1 / math.sqrt(hidden_size)
-        self.W_x = torch.nn.Parameter(torch.FloatTensor(input_size, hidden_size).uniform_(stdv, -stdv))
-        self.W_h = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(stdv, -stdv))
+        self.W_x = torch.nn.Parameter(torch.FloatTensor(input_size, hidden_size).uniform_(-stdv, stdv))
+        self.W_h = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
         self.b = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
 
     def forward(self, x: PackedSequence, hidden=None):
@@ -150,14 +160,15 @@ class RNNCell(torch.nn.Module):
 
         # x_unpacked.size() => (B, Seq, input_size)
         x_seq = x_unpacked.permute(1, 0, 2)  # => (Seq, B, input_size)
-        # not optimal, because calculate lengths also for parts that should not be included
+        # TODO: not optimal, because calculate lengths also for parts that should not be included
+        # TODO: do hidden calculation with trimmed input and pad after stacking?
         for x_t in x_seq:
             # x_t.size() => (B, input_size)
             # Vanilla RNN
             hidden = torch.tanh(x_t @ self.W_x + hidden @ self.W_h + self.b)
             h_out.append(hidden)
-        t_h_out = torch.stack(h_out)
-        t_h_out = t_h_out.permute(1, 0, 2)  # => (B, Seq, input_size)
+        t_h_out = torch.stack(h_out)  # => (Seq, B, hidden_size)
+        t_h_out = t_h_out.permute(1, 0, 2)  # => (B, Seq, hidden_size)
         t_h_packed = pack_padded_sequence(t_h_out, lengths, batch_first=True)
         return t_h_packed
 
@@ -167,26 +178,40 @@ class Model(torch.nn.Module):
         super().__init__()
         self.embeddings = torch.nn.Embedding(
             num_embeddings=dataset_full.max_classes_tokens,
-            embedding_dim=RNN_HIDDEN_SIZE
+            embedding_dim=RNN_INPUT_SIZE
         )
-        layers = []
-        for _ in range(RNN_LAYERS):
+        # TODO: why and how much stack RNN cells? and reasons?
+        #  can we use internal cell's sequence as we use internal conv layers to see learned basic features?
+        # RNN input cell
+        layers = [RNNCell(
+            input_size=RNN_INPUT_SIZE,
+            hidden_size=RNN_HIDDEN_SIZE
+        )]
+        # RNN internall cells
+        for _ in range(RNN_LAYERS-2):
             layers.append(RNNCell(
                 input_size=RNN_HIDDEN_SIZE,
                 hidden_size=RNN_HIDDEN_SIZE
             ))
+        # RNN output sell
+        layers.append(RNNCell(
+            input_size=RNN_HIDDEN_SIZE,
+            hidden_size=RNN_INPUT_SIZE
+        ))
         self.rnn = torch.nn.Sequential(*layers)
 
     def forward(self, x: PackedSequence, hidden=None):
         # x.shape (B, Seq, Classes_of_words) => x.shape (B, Seq) every sample is idx of class
-        x_idxes = x.data.argmax(dim=1)
-        embs = self.embeddings.forward(x_idxes)
+        # PackedSequence x.data.shape = (All non-empty tokens, Hot-encoded)
+        x_idxes = x.data.argmax(dim=1)  # get idx of each token
+        embs = self.embeddings.forward(x_idxes)  # each token has z embedding vector of size 256
         embs_seq = PackedSequence(
             data=embs,
             batch_sizes=x.batch_sizes,
             sorted_indices=x.sorted_indices
         )
         hidden = self.rnn.forward(embs_seq)
+        # TODO: why call it logit? where is logit function? ln((p/1-p)) - tanh?
         y_prim_logits = hidden.data @ self.embeddings.weight.t()
         # y_prim_logits.shape = (B*Seq, F)
         y_prim = torch.softmax(y_prim_logits, dim=1)
@@ -195,7 +220,7 @@ class Model(torch.nn.Module):
             batch_sizes=x.batch_sizes,
             sorted_indices=x.sorted_indices
         )
-        return y_prim_packed, hidden
+        return y_prim_packed
 
 
 model = Model()
@@ -224,19 +249,23 @@ for epoch in range(1, EPOCHS + 1):
 
             x = x.float().to(DEVICE)
             y = y.float().to(DEVICE)
-
             idxes = torch.argsort(lengths, descending=True)
             lengths = lengths[idxes]
             max_len = int(lengths.max())
+            # sort sentences by length desc and slice
+            # in x last word is either empty or 'END', and in y it is shifted first word)
+            # TODO: some of sentences will have end_token, some not?
             x = x[idxes, :max_len]
             y = y[idxes, :max_len]
             x_packed = pack_padded_sequence(x, lengths, batch_first=True)
             y_packed = pack_padded_sequence(y, lengths, batch_first=True)
 
-            y_prim_packed, _ = model.forward(x_packed)
+            y_prim_packed = model.forward(x_packed)
 
             weights = torch.from_numpy(dataset_full.weights[torch.argmax(y_packed.data, dim=1).cpu().numpy()])
             weights = weights.unsqueeze(dim=1).to(DEVICE)
+            # TODO: what are other weight options to use? if rare words are not removed from vocabulary,
+            #  then it doesn't make sense to have hight weight for rare word
             loss = -torch.mean(weights * y_packed.data * torch.log(y_prim_packed.data + 1e-8))
 
             metrics_epoch[f'{stage}_loss'].append(loss.item())  # Tensor(0.1) => 0.1f
@@ -265,7 +294,7 @@ for epoch in range(1, EPOCHS + 1):
 
     if best_test_loss > loss.item():
         best_test_loss = loss.item()
-        torch.save(model.cpu().state_dict(), f'./results/model-{epoch}.pt')
+        torch.save(model.cpu().state_dict(), f'./old-results-corrupted/model-{epoch}.pt')
         model = model.to(DEVICE)
 
     print('Examples:')
@@ -290,5 +319,5 @@ for epoch in range(1, EPOCHS + 1):
         c += 1
 
     plt.legend(plts, [it.get_label() for it in plts])
-    plt.savefig(f'./results/epoch-{epoch}.png')
+    plt.savefig(f'./old-results-corrupted/epoch-{epoch}.png')
     plt.show()
