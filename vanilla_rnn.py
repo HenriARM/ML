@@ -145,7 +145,7 @@ class RNNCell(torch.nn.Module):
         self.hidden_size = hidden_size
         # TODO: why not sqrt(hidden_size **2)?
         stdv = 1 / math.sqrt(hidden_size)
-        self.W_x = torch.nn.Parameter(torch.FloatTensor(input_size, hidden_size).uniform_(-stdv, stdv))
+        self.W_x = torch.nn.Parameter(torch.FloatTensor(hidden_size, input_size).uniform_(-stdv, stdv))
         self.W_h = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
         self.b = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
 
@@ -174,8 +174,10 @@ class RNNCell(torch.nn.Module):
 
         for x_t in x_seq:
             # x_t.size() => (B, input_size)
-            # Vanilla RNN
-            hidden = torch.tanh(x_t @ self.W_x + hidden @ self.W_h + self.b)
+            # W_x.size() => (hidden_size, input_size)
+            # (_, hid, in) x (B, in, 1) => (B, hid, 1).unsqueeze => (B, hid)
+            hidden = torch.tanh((self.W_x @ x_t.unsqueeze(dim=-1)).squeeze(dim=-1) \
+                                + (self.W_h @ hidden.unsqueeze(dim=-1)).squeeze(dim=-1) + self.b)
             h_out.append(hidden)
         t_h_out = torch.stack(h_out)  # => (Seq, B, hidden_size)
         t_h_out = t_h_out.permute(1, 0, 2)  # => (B, Seq, hidden_size)
