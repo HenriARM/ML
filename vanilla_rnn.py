@@ -23,6 +23,8 @@ RNN_HIDDEN_SIZE = 512
 RNN_LAYERS = 3
 RNN_DROPOUT = 0.3
 
+PACKING = True
+
 run_path = ''
 
 DEVICE = 'cpu'
@@ -119,7 +121,7 @@ class DatasetCustom(torch.utils.data.Dataset):
         return np_x_padded, np_y_padded, np_length
 
 
-# TODO: explain seed
+# zero seed will result on having always same random split
 torch.manual_seed(0)
 dataset_full = DatasetCustom()
 dataset_train, dataset_test = torch.utils.data.random_split(
@@ -143,42 +145,52 @@ class RNNCell(torch.nn.Module):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        # TODO: why not sqrt(hidden_size **2)?
         stdv = 1 / math.sqrt(hidden_size)
         self.W_x = torch.nn.Parameter(torch.FloatTensor(hidden_size, input_size).uniform_(-stdv, stdv))
         self.W_h = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
         self.b = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
 
     def forward(self, x: PackedSequence, hidden=None):
-        h_out = []
+        # x.data.shape => (x.batch_sizes.sum(), input_size) => (Pack_batch_1 + ... + Pack_batch_Seq, input_size)
+        # x.batch_sizes.shape => (Seq)
 
+        def calc_hidden(xx_t, h):
+            # h.size() =>  always (B, input_size)
+            # xx_t.size() => (B, input_size) | (PackB, input_size)
+            # W_x.size() => (hidden_size, input_size)
+            # W_mul_x = (_, hid, in) x (B, in, 1) => (B, hid, 1).unsqueeze => (B, hid)
+            W_mul_x = (self.W_x @ xx_t.unsqueeze(dim=-1)).squeeze(dim=-1)
+            W_mul_h = (self.W_h @ h.unsqueeze(dim=-1)).squeeze(dim=-1)
+            if PACKING is True and W_mul_x.shape[0] != W_mul_h.shape[0]:
+                # either trim h before W_mul_h and bias, cause t+1 and later results we don't need
+                # or pad with zeros W_mul_x
+                empty_tensor = torch.zeros(W_mul_h.shape)
+                empty_tensor[:W_mul_x.shape[0]] = W_mul_x
+                W_mul_x = empty_tensor
+            return torch.tanh(W_mul_x + W_mul_h + self.b)
+
+        h_out = []
         # convert from optimal seq data layout to zero padded version
         x_unpacked, lengths = pad_packed_sequence(x, batch_first=True)
         batch_size = x_unpacked.size(0)
         if hidden is None:
             hidden = torch.FloatTensor(batch_size, self.hidden_size).zero_().to(DEVICE)  # (B, H)
-
         # x_unpacked.size() => (B, Seq, input_size)
-        x_seq = x_unpacked.permute(1, 0, 2)  # => (Seq, B, input_size)
+        if PACKING is False:
+            x_seq = x_unpacked.permute(1, 0, 2)  # => (Seq, B, input_size)
+            for x_t in x_seq:
+                hidden = calc_hidden(x_t, hidden)
+                h_out.append(hidden)
+        else:
+            # iterate packed seqs
+            prev_pbatch = 0
+            for pbatch in list(x.batch_sizes.numpy()):
+                next_pbatch = prev_pbatch + pbatch
+                x_t = x.data[prev_pbatch:next_pbatch]
+                prev_pbatch = next_pbatch
+                hidden = calc_hidden(x_t, hidden)
+                h_out.append(hidden)
 
-        # TODO: idea - trim x_t zeros and padd results on output
-        '''
-        for x_t in x_seq:
-            x_t_trimmed = np.trim_zeros(x_t)
-            # TODO: trim hidden also
-            hidden = torch.tanh(x_t @ self.W_x + hidden @ self.W_h + self.b)
-            h_out.append(hidden)
-        '''
-        # TODO: idea - go seq by seq and then stack into batch outs
-        # TODO: idea - override matrix multiplication function with ignoring 0 calculations (problems with parallel)
-
-        for x_t in x_seq:
-            # x_t.size() => (B, input_size)
-            # W_x.size() => (hidden_size, input_size)
-            # (_, hid, in) x (B, in, 1) => (B, hid, 1).unsqueeze => (B, hid)
-            hidden = torch.tanh((self.W_x @ x_t.unsqueeze(dim=-1)).squeeze(dim=-1) \
-                                + (self.W_h @ hidden.unsqueeze(dim=-1)).squeeze(dim=-1) + self.b)
-            h_out.append(hidden)
         t_h_out = torch.stack(h_out)  # => (Seq, B, hidden_size)
         t_h_out = t_h_out.permute(1, 0, 2)  # => (B, Seq, hidden_size)
         t_h_packed = pack_padded_sequence(t_h_out, lengths, batch_first=True)
@@ -192,8 +204,6 @@ class Model(torch.nn.Module):
             num_embeddings=dataset_full.max_classes_tokens,
             embedding_dim=RNN_INPUT_SIZE
         )
-        # TODO: why and how much stack RNN cells? and reasons?
-        #  can we use internal cell's sequence as we use internal conv layers to see learned basic features?
         # RNN input cell
         layers = [RNNCell(
             input_size=RNN_INPUT_SIZE,
@@ -223,7 +233,6 @@ class Model(torch.nn.Module):
             sorted_indices=x.sorted_indices
         )
         hidden = self.rnn.forward(embs_seq)
-        # TODO: why call it logit? where is logit function? ln((p/1-p)) - tanh?
         y_prim_logits = hidden.data @ self.embeddings.weight.t()
         # y_prim_logits.shape = (B*Seq, F)
         y_prim = torch.softmax(y_prim_logits, dim=1)
@@ -266,7 +275,6 @@ for epoch in range(1, EPOCHS + 1):
             max_len = int(lengths.max())
             # sort sentences by length desc and slice
             # in x last word is either empty or 'END', and in y it is shifted first word)
-            # TODO: some of sentences will have end_token, some not?
             x = x[idxes, :max_len]
             y = y[idxes, :max_len]
             x_packed = pack_padded_sequence(x, lengths, batch_first=True)
@@ -276,8 +284,6 @@ for epoch in range(1, EPOCHS + 1):
 
             weights = torch.from_numpy(dataset_full.weights[torch.argmax(y_packed.data, dim=1).cpu().numpy()])
             weights = weights.unsqueeze(dim=1).to(DEVICE)
-            # TODO: what are other weight options to use? if rare words are not removed from vocabulary,
-            #  then it doesn't make sense to have hight weight for rare word
             loss = -torch.mean(weights * y_packed.data * torch.log(y_prim_packed.data + 1e-8))
 
             metrics_epoch[f'{stage}_loss'].append(loss.item())  # Tensor(0.1) => 0.1f
