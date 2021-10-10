@@ -20,7 +20,7 @@ LEARNING_RATE = 1e-3
 
 RNN_INPUT_SIZE = 256
 RNN_HIDDEN_SIZE = 512
-RNN_LAYERS = 1
+RNN_LAYERS = 3
 RNN_DROPOUT = 0.3
 
 PACKING = True
@@ -44,9 +44,14 @@ os.makedirs(PATH_DATA, exist_ok=True)
 
 class DatasetCustom(torch.utils.data.Dataset):
     def __init__(self):
-        if not os.path.exists(f'{PATH_DATA}/recipes_raw_nosource_epi.json'):
-            download_url_to_file('https://www.yellowrobot.xyz/share/recipes_raw_nosource_epi.json', progress=True)
-        with open(f'{PATH_DATA}/recipes_raw_nosource_epi.json') as fp:
+        # if not os.path.exists(f'{PATH_DATA}/recipes_raw_nosource_epi.json'):
+        #     download_url_to_file('https://www.yellowrobot.xyz/share/recipes_raw_nosource_epi.json', progress=True)
+        #     doesn't work
+        #     download_url_to_file('https://www.kaggle.com/akmittal/quotes-dataset/download',
+        #     dst=f'{PATH_DATA}/a.zip', progress=True)
+        # with open(f'{PATH_DATA}/recipes_raw_nosource_epi.json') as fp:
+        #     data_json = json.load(fp)
+        with open(f'{PATH_DATA}/quotes.json', encoding="utf-8") as fp:
             data_json = json.load(fp)
 
         self.sentences = []
@@ -55,10 +60,11 @@ class DatasetCustom(torch.utils.data.Dataset):
         self.words_counts = {}
         self.idxes_to_words = {}
 
-        for each_instruction in data_json.values():
-            str_instructions = each_instruction['instructions']
-            sentences = sent_tokenize(str_instructions)
+        for quote_obj in data_json:
+            quote = quote_obj['Quote']
+            sentences = sent_tokenize(quote)
             for sentence in sentences:
+                # TODO: remove punctuations and \, apostrophes
                 words = word_tokenize(sentence.lower())
                 if len(words) > MAX_SENTENCE_LEN:
                     words = words[:MAX_SENTENCE_LEN]
@@ -99,12 +105,10 @@ class DatasetCustom(torch.utils.data.Dataset):
             print(' '.join([self.idxes_to_words[it] for it in each]))
         # nltk.FreqDist(token), token = ['asa', 'ad', 'asasccsa'] or maybe send idxs?
         # ' '.join([self.idxes_to_words[it] for it in self.sentences[0]])
-        # TODO placeholder to replace rare words
         # freq_dist = nltk.FreqDist(token)
         # rarewords = freq_dist.keys()[-50:]
         # after_rare_words = [word for word in token not in rarewords]
-        # TODO remove punctuation
-        # TODO histogtam of words_counts TODO: nltk.FreqDist, words is on x axis
+        # TODO histogtam of words_counts (nltk.FreqDist, words is on x axis), replace rare words based on popularity
 
     def __len__(self):
         return len(self.sentences)
