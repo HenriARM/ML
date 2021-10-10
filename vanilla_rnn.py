@@ -20,7 +20,7 @@ LEARNING_RATE = 1e-3
 
 RNN_INPUT_SIZE = 256
 RNN_HIDDEN_SIZE = 512
-RNN_LAYERS = 3
+RNN_LAYERS = 1
 RNN_DROPOUT = 0.3
 
 PACKING = True
@@ -155,7 +155,7 @@ class RNNCell(torch.nn.Module):
         # x.batch_sizes.shape => (Seq)
 
         def calc_hidden(xx_t, h):
-            # h.size() =>  always (B, input_size)
+            # h.size() =>  always (B, hidden_size)
             # xx_t.size() => (B, input_size) | (PackB, input_size)
             # W_x.size() => (hidden_size, input_size)
             # W_mul_x = (_, hid, in) x (B, in, 1) => (B, hid, 1).unsqueeze => (B, hid)
