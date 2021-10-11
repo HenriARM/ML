@@ -9,8 +9,12 @@ from torch.hub import download_url_to_file
 import torch.utils.data
 
 # pip install nltk
-from nltk.tokenize import sent_tokenize, word_tokenize
 import nltk
+from nltk.tokenize import sent_tokenize, word_tokenize, RegexpTokenizer
+from nltk.corpus import stopwords
+# nltk.download('stopwords')
+stop_words = stopwords.words('english')
+print(stop_words)
 
 # nltk.download() #downlaod punkt manualy
 
@@ -64,8 +68,18 @@ class DatasetCustom(torch.utils.data.Dataset):
             quote = quote_obj['Quote']
             sentences = sent_tokenize(quote)
             for sentence in sentences:
-                # TODO: remove punctuations and \, apostrophes
-                words = word_tokenize(sentence.lower())
+                # convert string to lowercase and remove punctions
+                words = RegexpTokenizer(r'\w+').tokenize(sentence.lower())
+                # e.x. 'Don\'t cry because it\'s over, smile because it happened.'
+                # 1. RegexpTokenizer(r'\w+').tokenize(s)
+                # ['Don', 't', 'cry', 'because', 'it', 's', 'over', 'smile', 'because', 'it', 'happened']
+                # 2. words = word_tokenize(sentence.lower()) -> words=[word.lower() for word in words if word.isalpha()]
+                # ['do', "n't", 'cry', 'because', 'it', "'s", 'over', ',', 'smile', 'because', 'it', 'happened', '.']
+                # ['do', 'cry', 'because', 'it', 'over', 'smile', 'because', 'it', 'happened']
+
+                # remove stop words e.x. => ['cry', 'smile', 'happened']
+                # filtered_sentence = [w for w in words if not w in stop_words]
+
                 if len(words) > MAX_SENTENCE_LEN:
                     words = words[:MAX_SENTENCE_LEN]
                 if len(words) < MIN_SENTENCE_LEN:
@@ -108,6 +122,7 @@ class DatasetCustom(torch.utils.data.Dataset):
         # freq_dist = nltk.FreqDist(token)
         # rarewords = freq_dist.keys()[-50:]
         # after_rare_words = [word for word in token not in rarewords]
+        # TODO: check vocabulary created and remove then all words + print y on output and understand what word is missing, maybe color it on output
         # TODO histogtam of words_counts (nltk.FreqDist, words is on x axis), replace rare words based on popularity
 
     def __len__(self):
@@ -322,14 +337,16 @@ for epoch in range(1, EPOCHS + 1):
     print('Examples:')
     y_prim_unpacked, lengths_unpacked = pad_packed_sequence(y_prim_packed.cpu(), batch_first=True)
     y_prim_unpacked = y_prim_unpacked[:5]  # 5 examples
+    y_unpacked, _ = pad_packed_sequence(y_packed.cpu(), batch_first=True)
+    y_unpacked = y_unpacked[:5]  # 5 examples
     for idx, each in enumerate(y_prim_unpacked):
         length = lengths_unpacked[idx]
-
         y_prim_idxes = np.argmax(each[:length].data.numpy(), axis=1).tolist()
         x_idxes = np.argmax(x[idx, :length].cpu().data.numpy(), axis=1).tolist()
         y_prim_idxes = [x_idxes[0]] + y_prim_idxes
         print('x     : ' + ' '.join([dataset_full.idxes_to_words[it] for it in x_idxes]))
         print('y_prim: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_prim_idxes]))
+        print('y: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_prim_idxes]))
         print('')
 
     plt.figure(figsize=(12, 5))
