@@ -193,10 +193,6 @@ class GRUCell(torch.nn.Module):
         self.W_h_n = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
         self.b_h_n = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
 
-        # self.W_x = torch.nn.Parameter(torch.FloatTensor(hidden_size, input_size).uniform_(-stdv, stdv))
-        # self.W_h = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
-        # self.b = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
-
     # https://pytorch.org/docs/stable/generated/torch.nn.GRU.html
     # TODO: why n_t is multiplied by (1 - z_t), but h_t-1 by z_t
     def forward(self, x: PackedSequence, hidden=None):
