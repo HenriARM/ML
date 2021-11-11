@@ -168,6 +168,76 @@ data_loader_test = torch.utils.data.DataLoader(
 )
 
 
+class GRUCell(torch.nn.Module):
+    # https://towardsdatascience.com/illustrated-guide-to-lstms-and-gru-s-a-step-by-step-explanation-44e9eb85bf21
+    # update gate z_t - what information to store and what to throw away (using sigmoid 0..1 output)
+    # reset gate r_t - how much of past information to forget
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        stdv = 1 / math.sqrt(hidden_size)
+
+        self.W_i_r = torch.nn.Parameter(torch.FloatTensor(hidden_size, input_size).uniform_(-stdv, stdv))
+        self.b_i_r = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
+        self.W_h_r = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
+        self.b_h_r = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
+
+        self.W_i_z = torch.nn.Parameter(torch.FloatTensor(hidden_size, input_size).uniform_(-stdv, stdv))
+        self.b_i_z = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
+        self.W_h_z = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
+        self.b_h_z = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
+
+        self.W_i_n = torch.nn.Parameter(torch.FloatTensor(hidden_size, input_size).uniform_(-stdv, stdv))
+        self.b_i_n = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
+        self.W_h_n = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
+        self.b_h_n = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
+
+        # self.W_x = torch.nn.Parameter(torch.FloatTensor(hidden_size, input_size).uniform_(-stdv, stdv))
+        # self.W_h = torch.nn.Parameter(torch.FloatTensor(hidden_size, hidden_size).uniform_(-stdv, stdv))
+        # self.b = torch.nn.Parameter(torch.FloatTensor(hidden_size).zero_())
+
+    # https://pytorch.org/docs/stable/generated/torch.nn.GRU.html
+    # TODO: why n_t is multiplied by (1 - z_t), but h_t-1 by z_t
+    def forward(self, x: PackedSequence, hidden=None):
+        # x.data.shape => (x.batch_sizes.sum(), input_size) => (Pack_batch_1 + ... + Pack_batch_Seq, input_size)
+        # x.batch_sizes.shape => (Seq)
+        # x_unpacked.size() => (B, Seq, input_size)
+        x_unpacked, lengths = pad_packed_sequence(x, batch_first=True)
+
+        # hidden == h_t-1
+        h_out = []
+        # hidden.size() =>  (B, self.hidden_size)
+        if hidden is None:
+            hidden = torch.FloatTensor(x_unpacked.size(0), self.hidden_size).zero_().to(DEVICE)  # (B, H)
+
+        x_seq = x_unpacked.permute(1, 0, 2)  # => (Seq, B, input_size)
+        for x_t in x_seq:
+            # x_t.size() => (B, input_size)
+
+            # W_i_r_mul_x = (_, hid, in) x (B, in, 1) => (B, hid, 1).unsqueeze => (B, hid)
+            W_i_r_mul_x = (self.W_i_r @ x_t.unsqueeze(dim=-1)).squeeze(dim=-1)
+            # W_h_r_mul_h = (_, hid, hid) x (B, hid, 1) => (B, hid, 1).unsqueeze => (B, hid)
+            W_h_r_mul_h = (self.W_h_r @ hidden.unsqueeze(dim=-1)).squeeze(dim=-1)
+            r_t = torch.sigmoid(W_i_r_mul_x + self.b_i_r + W_h_r_mul_h + self.b_h_r)
+
+            W_i_z_mul_x = (self.W_i_z @ x_t.unsqueeze(dim=-1)).squeeze(dim=-1)
+            W_h_z_mul_h = (self.W_h_z @ hidden.unsqueeze(dim=-1)).squeeze(dim=-1)
+            z_t = torch.sigmoid(W_i_z_mul_x + self.b_i_z + W_h_z_mul_h + self.b_h_z)
+
+            W_i_n_mul_x = (self.W_i_n @ x_t.unsqueeze(dim=-1)).squeeze(dim=-1)
+            W_h_n_mul_h = (self.W_h_n @ hidden.unsqueeze(dim=-1)).squeeze(dim=-1)
+            n_t = torch.tanh(W_i_n_mul_x + self.b_i_n + r_t * (W_h_n_mul_h + self.b_h_n))  # * - hadamard product
+
+            hidden = (1 - z_t) * n_t + z_t * hidden
+            h_out.append(hidden)
+
+        t_h_out = torch.stack(h_out)  # => (Seq, B, hidden_size)
+        t_h_out = t_h_out.permute(1, 0, 2)  # => (B, Seq, hidden_size)
+        t_h_packed = pack_padded_sequence(t_h_out, lengths, batch_first=True)
+        return t_h_packed
+
+
 class RNNCell(torch.nn.Module):
     def __init__(self, input_size, hidden_size):
         super().__init__()
@@ -232,11 +302,16 @@ class Model(torch.nn.Module):
             num_embeddings=dataset_full.max_classes_tokens,
             embedding_dim=RNN_INPUT_SIZE
         )
-        # RNN input cell
-        layers = [RNNCell(
+        # GRU
+        layers = [GRUCell(
             input_size=RNN_INPUT_SIZE,
             hidden_size=RNN_HIDDEN_SIZE
         )]
+        # # RNN input cell
+        # layers = [RNNCell(
+        #     input_size=RNN_INPUT_SIZE,
+        #     hidden_size=RNN_HIDDEN_SIZE
+        # )]
         # # RNN internall cells
         # for _ in range(RNN_LAYERS - 2):
         #     layers.append(RNNCell(
