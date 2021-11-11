@@ -19,16 +19,16 @@ stop_words = stopwords.words('english')
 
 # nltk.download() #downlaod punkt manualy
 
-BATCH_SIZE = 128
-EPOCHS = 100
+BATCH_SIZE = 64
+EPOCHS = 500
 LEARNING_RATE = 1e-3
 
 RNN_INPUT_SIZE = 256
-RNN_HIDDEN_SIZE = 512
-RNN_LAYERS = 3
+RNN_HIDDEN_SIZE = 256  # 512
+RNN_LAYERS = 1
 RNN_DROPOUT = 0.3
 
-PACKING = True
+PACKING = False  # True
 
 run_path = ''
 
@@ -38,7 +38,7 @@ if torch.cuda.is_available():
 
 MIN_SENTENCE_LEN = 3
 MAX_SENTENCE_LEN = 20
-MAX_LEN = 200  # limit max number of samples otherwise too slow training (on GPU use all samples / for final training)
+MAX_LEN = 200  # 200  # limit max number of samples otherwise too slow training (on GPU use all samples / for final training)
 if DEVICE == 'cuda':
     MAX_LEN = 10000
 
@@ -189,12 +189,12 @@ class RNNCell(torch.nn.Module):
             # W_mul_x = (_, hid, in) x (B, in, 1) => (B, hid, 1).unsqueeze => (B, hid)
             W_mul_x = (self.W_x @ xx_t.unsqueeze(dim=-1)).squeeze(dim=-1)
             W_mul_h = (self.W_h @ h.unsqueeze(dim=-1)).squeeze(dim=-1)
-            if PACKING is True and W_mul_x.shape[0] != W_mul_h.shape[0]:
-                # either trim h before W_mul_h and bias, cause t+1 and later results we don't need
-                # or pad with zeros W_mul_x
-                empty_tensor = torch.zeros(W_mul_h.shape)
-                empty_tensor[:W_mul_x.shape[0]] = W_mul_x
-                W_mul_x = empty_tensor
+            # if PACKING is True and W_mul_x.shape[0] != W_mul_h.shape[0]:
+            #     # either trim h before W_mul_h and bias, cause t+1 and later results we don't need
+            #     # or pad with zeros W_mul_x
+            #     empty_tensor = torch.zeros(W_mul_h.shape)
+            #     empty_tensor[:W_mul_x.shape[0]] = W_mul_x
+            #     W_mul_x = empty_tensor
             return torch.tanh(W_mul_x + W_mul_h + self.b)
 
         h_out = []
@@ -209,15 +209,15 @@ class RNNCell(torch.nn.Module):
             for x_t in x_seq:
                 hidden = calc_hidden(x_t, hidden)
                 h_out.append(hidden)
-        else:
-            # iterate packed seqs
-            prev_pbatch = 0
-            for pbatch in list(x.batch_sizes.numpy()):
-                next_pbatch = prev_pbatch + pbatch
-                x_t = x.data[prev_pbatch:next_pbatch]
-                prev_pbatch = next_pbatch
-                hidden = calc_hidden(x_t, hidden)
-                h_out.append(hidden)
+        # else:
+        #     # iterate packed seqs
+        #     prev_pbatch = 0
+        #     for pbatch in list(x.batch_sizes.numpy()):
+        #         next_pbatch = prev_pbatch + pbatch
+        #         x_t = x.data[prev_pbatch:next_pbatch]
+        #         prev_pbatch = next_pbatch
+        #         hidden = calc_hidden(x_t, hidden)
+        #         h_out.append(hidden)
 
         t_h_out = torch.stack(h_out)  # => (Seq, B, hidden_size)
         t_h_out = t_h_out.permute(1, 0, 2)  # => (B, Seq, hidden_size)
@@ -237,17 +237,17 @@ class Model(torch.nn.Module):
             input_size=RNN_INPUT_SIZE,
             hidden_size=RNN_HIDDEN_SIZE
         )]
-        # RNN internall cells
-        for _ in range(RNN_LAYERS - 2):
-            layers.append(RNNCell(
-                input_size=RNN_HIDDEN_SIZE,
-                hidden_size=RNN_HIDDEN_SIZE
-            ))
-        # RNN output sell
-        layers.append(RNNCell(
-            input_size=RNN_HIDDEN_SIZE,
-            hidden_size=RNN_INPUT_SIZE
-        ))
+        # # RNN internall cells
+        # for _ in range(RNN_LAYERS - 2):
+        #     layers.append(RNNCell(
+        #         input_size=RNN_HIDDEN_SIZE,
+        #         hidden_size=RNN_HIDDEN_SIZE
+        #     ))
+        # # RNN output sell
+        # layers.append(RNNCell(
+        #     input_size=RNN_HIDDEN_SIZE,
+        #     hidden_size=RNN_INPUT_SIZE
+        # ))
         self.rnn = torch.nn.Sequential(*layers)
 
     def forward(self, x: PackedSequence, hidden=None):
