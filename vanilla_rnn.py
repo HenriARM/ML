@@ -12,9 +12,10 @@ import torch.utils.data
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize, RegexpTokenizer
 from nltk.corpus import stopwords
+
 # nltk.download('stopwords')
 stop_words = stopwords.words('english')
-print(stop_words)
+# print(stop_words)
 
 # nltk.download() #downlaod punkt manualy
 
@@ -124,26 +125,27 @@ class DatasetCustom(torch.utils.data.Dataset):
         samples = np.random.choice(self.sentences, 5)
         for each in samples:
             print(' '.join([self.idxes_to_words[it] for it in each]))
-        # nltk.FreqDist(token), token = ['asa', 'ad', 'asasccsa'] or maybe send idxs?
-        # ' '.join([self.idxes_to_words[it] for it in self.sentences[0]])
-        # freq_dist = nltk.FreqDist(token)
-        # rarewords = freq_dist.keys()[-50:]
-        # after_rare_words = [word for word in token not in rarewords]
-        # TODO: check vocabulary created and remove then all words + print y on output and understand what word is missing, maybe color it on output
-        # TODO histogtam of words_counts (nltk.FreqDist, words is on x axis), replace rare words based on popularity
 
     def __len__(self):
         return len(self.sentences)
 
     def __getitem__(self, idx):
-        np_x_idxes = np.array(self.sentences[idx] + [self.words_to_idxes[self.end_token]])
+        # data - abcdef
+        # x - abcde<end>
+        # y - bcdef<end>
+
+        np_x_idxes = np.array(self.sentences[idx][:-1] + [self.words_to_idxes[self.end_token]])
         np_x_padded = np.zeros((self.max_length, self.max_classes_tokens))
         np_x_padded[np.arange(len(np_x_idxes)), np_x_idxes] = 1.0
 
-        # word hot-encoding shifts up (first word goes to the end, second to first)
-        np_y_padded = np.roll(np_x_padded, shift=-1, axis=0)
+        np_y_idxes = np.array(self.sentences[idx][1:] + [self.words_to_idxes[self.end_token]])
+        np_y_padded = np.zeros((self.max_length, self.max_classes_tokens))
+        np_y_padded[np.arange(len(np_y_idxes)), np_y_idxes] = 1.0
+
         np_length = self.lengths[idx]
 
+        # print([self.idxes_to_words[idx] for idx in np_x_idxes])
+        # print([self.idxes_to_words[idx] for idx in np_y_idxes])
         return np_x_padded, np_y_padded, np_length
 
 
@@ -336,25 +338,25 @@ for epoch in range(1, EPOCHS + 1):
                 metrics_strs.append(f'{key}: {round(value, 2)}')
         print(f'epoch: {epoch} {" ".join(metrics_strs)}')
 
+        # validation
+        if data_loader == data_loader_test:
+            y_prim_unpacked, lengths_unpacked = pad_packed_sequence(y_prim_packed.cpu(), batch_first=True)
+            y_prim_unpacked = y_prim_unpacked[0]
+            x = x[0]
+            y = y[0]
+            y_prim_idxes = np.argmax(y_prim_unpacked[:lengths_unpacked[0]].data.numpy(), axis=1).tolist()
+            x_idxes = np.argmax(x[:lengths_unpacked[0]].data.numpy(), axis=1).tolist()
+            y_idxes = np.argmax(y[:lengths_unpacked[0]].data.numpy(), axis=1).tolist()
+            print('Validation:')
+            print('x: ' + ' '.join([dataset_full.idxes_to_words[it] for it in x_idxes]))
+            print('y: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_idxes]))
+            print('y_prim: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_prim_idxes]))
+            print(' ')
+
     if best_test_loss > loss.item():
         best_test_loss = loss.item()
         torch.save(model.cpu().state_dict(), f'./old-results-corrupted/model-{epoch}.pt')
         model = model.to(DEVICE)
-
-    print('Examples:')
-    y_prim_unpacked, lengths_unpacked = pad_packed_sequence(y_prim_packed.cpu(), batch_first=True)
-    y_prim_unpacked = y_prim_unpacked[:5]  # 5 examples
-    y_unpacked, _ = pad_packed_sequence(y_packed.cpu(), batch_first=True)
-    y_unpacked = y_unpacked[:5]  # 5 examples
-    for idx, each in enumerate(y_prim_unpacked):
-        length = lengths_unpacked[idx]
-        y_prim_idxes = np.argmax(each[:length].data.numpy(), axis=1).tolist()
-        x_idxes = np.argmax(x[idx, :length].cpu().data.numpy(), axis=1).tolist()
-        y_prim_idxes = [x_idxes[0]] + y_prim_idxes
-        print('x     : ' + ' '.join([dataset_full.idxes_to_words[it] for it in x_idxes]))
-        print('y_prim: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_prim_idxes]))
-        print('y: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_prim_idxes]))
-        print('')
 
     plt.figure(figsize=(12, 5))
     plts = []
