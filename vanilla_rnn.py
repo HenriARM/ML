@@ -105,6 +105,7 @@ class DatasetCustom(torch.utils.data.Dataset):
         plt.show()
         # sum(vals) = 375 now, before it was 1122
 
+        self.max_length = np.max(self.lengths) + 1  # longest sentence length + 1
         self.end_token = '[END]'
         self.words_to_idxes[self.end_token] = len(self.words_to_idxes)
         self.idxes_to_words[self.words_to_idxes[self.end_token]] = self.end_token
@@ -159,7 +160,7 @@ data_loader_train = torch.utils.data.DataLoader(
     shuffle=True
 )
 data_loader_test = torch.utils.data.DataLoader(
-    dataset=dataset_train,
+    dataset=dataset_test,
     batch_size=BATCH_SIZE,
     shuffle=False
 )
