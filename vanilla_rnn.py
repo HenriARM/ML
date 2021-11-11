@@ -68,17 +68,16 @@ class DatasetCustom(torch.utils.data.Dataset):
             quote = quote_obj['Quote']
             sentences = sent_tokenize(quote)
             for sentence in sentences:
-                # convert string to lowercase and remove punctions
-                words = RegexpTokenizer(r'\w+').tokenize(sentence.lower())
-                # e.x. 'Don\'t cry because it\'s over, smile because it happened.'
-                # 1. RegexpTokenizer(r'\w+').tokenize(s)
-                # ['Don', 't', 'cry', 'because', 'it', 's', 'over', 'smile', 'because', 'it', 'happened']
-                # 2. words = word_tokenize(sentence.lower()) -> words=[word.lower() for word in words if word.isalpha()]
-                # ['do', "n't", 'cry', 'because', 'it', "'s", 'over', ',', 'smile', 'because', 'it', 'happened', '.']
-                # ['do', 'cry', 'because', 'it', 'over', 'smile', 'because', 'it', 'happened']
-
-                # remove stop words e.x. => ['cry', 'smile', 'happened']
-                # filtered_sentence = [w for w in words if not w in stop_words]
+                # split sentence into words and make them lowercase
+                words = str.split(sentence.lower())
+                # remove punctuation only at the end of word - e.x. "don't'" -> "don't"
+                words = [w[:-1] if str.isalpha(w[-1]) is False else w for w in words]
+                # filter out stop words
+                words = [w for w in words if w not in stop_words]
+                # filter one character tokens
+                words = [w for w in words if len(w) > 1]
+                # remove bad words i'm, i've, .., 10,00 (just didn't overcomplicate with other processing)
+                words = [w for w in words if w not in ["i'm", "i've", "..", "10,00"]]
 
                 if len(words) > MAX_SENTENCE_LEN:
                     words = words[:MAX_SENTENCE_LEN]
@@ -97,7 +96,14 @@ class DatasetCustom(torch.utils.data.Dataset):
             if MAX_LEN is not None and len(self.sentences) > MAX_LEN:
                 break
 
-        self.max_length = np.max(self.lengths) + 1  # longest sentence length + 1
+        # after checking freq dist removed characters
+        words_freq = dict(sorted(self.words_counts.items(), key=lambda item: item[1]))
+        n = 40
+        words = list(words_freq.keys())[-n:]
+        vals = list(words_freq.values())[-n:]
+        plt.barh(words, vals)
+        plt.show()
+        # sum(vals) = 375 now, before it was 1122
 
         self.end_token = '[END]'
         self.words_to_idxes[self.end_token] = len(self.words_to_idxes)
@@ -360,3 +366,14 @@ for epoch in range(1, EPOCHS + 1):
     plt.legend(plts, [it.get_label() for it in plts])
     plt.savefig(f'./old-results-corrupted/epoch-{epoch}.png')
     plt.show()
+
+"""
+                # # filter punctions
+                # words = RegexpTokenizer(r'\w+').tokenize(sentence.lower())
+                # e.x. 'Don\'t cry because it\'s over, smile because it happened.'
+                # 1. RegexpTokenizer(r'\w+').tokenize(s)
+                # ['Don', 't', 'cry', 'because', 'it', 's', 'over', 'smile', 'because', 'it', 'happened']
+                # 2. words = word_tokenize(sentence.lower()) -> words=[word.lower() for word in words if word.isalpha()]
+                # ['do', "n't", 'cry', 'because', 'it', "'s", 'over', ',', 'smile', 'because', 'it', 'happened', '.']
+                # ['do', 'cry', 'because', 'it', 'over', 'smile', 'because', 'it', 'happened']
+"""
