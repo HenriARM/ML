@@ -36,7 +36,7 @@ MAX_LEN = 200  # limit max number of samples otherwise too slow training (on GPU
 if DEVICE == 'cuda':
     MAX_LEN = None
 
-PATH_DATA = '../data'
+PATH_DATA = './data'
 os.makedirs('./results', exist_ok=True)
 os.makedirs(PATH_DATA, exist_ok=True)
 
@@ -154,6 +154,7 @@ class TransformerLayer(torch.nn.Module):
 
         out = out.transpose(1, 2)
         out = out.contiguous().view(batch_size, seq_size, HIDDEN_SIZE)
+        atten = atten.detach().mean(dim=1) # shape (B, Heads, seq, seq) => (B, seq, seq)
 
         # torch.nn.Module > self.training
         # model.eval() model.train()
@@ -184,7 +185,7 @@ class Model(torch.nn.Module):
 
     def forward(self, x: PackedSequence):
         x_e = PackedSequence(
-            data=self.embeddings.forward(x.data.argmax(dim=1)),
+            data=self.project_w_e.forward(x.data.argmax(dim=1)),
             batch_sizes=x.batch_sizes,
             sorted_indices=x.sorted_indices
         )
