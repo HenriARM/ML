@@ -193,7 +193,7 @@ class Model(torch.nn.Module):
 
         # 0, 1, 2, 3, 4.... => (B, Seq) => project_p_e => (B, Seq, HIDDEN_SIZE)
         # lengths[0]
-        pos_idxes = torch.arange(0, torch.max(lengths).to(DEVICE))
+        pos_idxes = torch.arange(0, torch.max(lengths).to(DEVICE)).to(DEVICE)
         p_e = self.project_p_e.forward(pos_idxes)  # (Seq,)
         p_e = p_e.unsqueeze(dim=0)  # (1, Seq, H)
         p_e = p_e.expand(x_e_unpacked.size())
