@@ -1,3 +1,4 @@
+import pickle
 import json
 import os
 import math
@@ -43,115 +44,168 @@ if DEVICE == 'cuda':
     MAX_LEN = 10000
 
 PATH_DATA = './data'
-os.makedirs('./old-results-corrupted', exist_ok=True)
+os.makedirs('./results', exist_ok=True)
 os.makedirs(PATH_DATA, exist_ok=True)
 
 
+# class DatasetCustom(torch.utils.data.Dataset):
+#     def __init__(self):
+#         # if not os.path.exists(f'{PATH_DATA}/recipes_raw_nosource_epi.json'):
+#         #     download_url_to_file('https://www.yellowrobot.xyz/share/recipes_raw_nosource_epi.json', progress=True)
+#         #     doesn't work
+#         #     download_url_to_file('https://www.kaggle.com/akmittal/quotes-dataset/download',
+#         #     dst=f'{PATH_DATA}/a.zip', progress=True)
+#         # with open(f'{PATH_DATA}/recipes_raw_nosource_epi.json') as fp:
+#         #     data_json = json.load(fp)
+#         with open(f'{PATH_DATA}/quotes.json', encoding="utf-8") as fp:
+#             data_json = json.load(fp)
+#
+#         self.sentences = []
+#         self.lengths = []  # lengths of all sentences
+#         self.words_to_idxes = {}
+#         self.words_counts = {}
+#         self.idxes_to_words = {}
+#
+#         for quote_obj in data_json:
+#             quote = quote_obj['Quote']
+#             sentences = sent_tokenize(quote)
+#             for sentence in sentences:
+#                 # split sentence into words and make them lowercase
+#                 words = str.split(sentence.lower())
+#                 # remove punctuation only at the end of word - e.x. "don't'" -> "don't"
+#                 words = [w[:-1] if str.isalpha(w[-1]) is False else w for w in words]
+#                 # filter out stop words
+#                 words = [w for w in words if w not in stop_words]
+#                 # filter one character tokens
+#                 words = [w for w in words if len(w) > 1]
+#                 # remove bad words i'm, i've, .., 10,00 (just didn't overcomplicate with other processing)
+#                 words = [w for w in words if w not in ["i'm", "i've", "..", "10,00"]]
+#
+#                 if len(words) > MAX_SENTENCE_LEN:
+#                     words = words[:MAX_SENTENCE_LEN]
+#                 if len(words) < MIN_SENTENCE_LEN:
+#                     continue
+#                 sentence_tokens = []
+#                 for word in words:
+#                     if word not in self.words_to_idxes:
+#                         self.words_to_idxes[word] = len(self.words_to_idxes)
+#                         self.idxes_to_words[self.words_to_idxes[word]] = word
+#                         self.words_counts[word] = 0
+#                     self.words_counts[word] += 1
+#                     sentence_tokens.append(self.words_to_idxes[word])
+#                 self.sentences.append(sentence_tokens)
+#                 self.lengths.append(len(sentence_tokens))
+#             if MAX_LEN is not None and len(self.sentences) > MAX_LEN:
+#                 break
+#
+#         # after checking freq dist removed characters
+#         words_freq = dict(sorted(self.words_counts.items(), key=lambda item: item[1]))
+#         n = 40
+#         words = list(words_freq.keys())[-n:]
+#         vals = list(words_freq.values())[-n:]
+#         plt.barh(words, vals)
+#         plt.show()
+#         # sum(vals) = 375 now, before it was 1122
+#
+#         self.max_length = np.max(self.lengths) + 1  # longest sentence length + 1
+#         self.end_token = '[END]'
+#         self.words_to_idxes[self.end_token] = len(self.words_to_idxes)
+#         self.idxes_to_words[self.words_to_idxes[self.end_token]] = self.end_token
+#         self.words_counts[self.end_token] = len(self.sentences)
+#
+#         self.max_classes_tokens = len(self.words_to_idxes)  # unique words amount
+#
+#         word_counts = np.array(list(self.words_counts.values()))
+#         self.weights = (1.0 / word_counts) * np.sum(word_counts) * 0.5  # more frequent word == smaller weight
+#
+#         print(f'self.sentences: {len(self.sentences)}')
+#         print(f'self.max_length: {self.max_length}')
+#         print(f'self.max_classes_tokens: {self.max_classes_tokens}')
+#
+#         print('Example sentences:')
+#         samples = np.random.choice(self.sentences, 5)
+#         for each in samples:
+#             print(' '.join([self.idxes_to_words[it] for it in each]))
+#
+#     def __len__(self):
+#         return len(self.sentences)
+#
+#     def __getitem__(self, idx):
+#         # data - abcdef
+#         # x - abcde<end>
+#         # y - bcdef<end>
+#
+#         np_x_idxes = np.array(self.sentences[idx][:-1] + [self.words_to_idxes[self.end_token]])
+#         np_x_padded = np.zeros((self.max_length, self.max_classes_tokens))
+#         np_x_padded[np.arange(len(np_x_idxes)), np_x_idxes] = 1.0
+#
+#         np_y_idxes = np.array(self.sentences[idx][1:] + [self.words_to_idxes[self.end_token]])
+#         np_y_padded = np.zeros((self.max_length, self.max_classes_tokens))
+#         np_y_padded[np.arange(len(np_y_idxes)), np_y_idxes] = 1.0
+#
+#         np_length = self.lengths[idx]
+#
+#         # print([self.idxes_to_words[idx] for idx in np_x_idxes])
+#         # print([self.idxes_to_words[idx] for idx in np_y_idxes])
+#         return np_x_padded, np_y_padded, np_length
+
+
+# # zero seed will result on having always same random split
+# torch.manual_seed(0)
+# dataset_full = DatasetCustom()
+# dataset_train, dataset_test = torch.utils.data.random_split(
+#     dataset_full, lengths=[int(len(dataset_full) * 0.8), len(dataset_full) - int(len(dataset_full) * 0.8)])
+# torch.seed()
+#
+# data_loader_train = torch.utils.data.DataLoader(
+#     dataset=dataset_train,
+#     batch_size=BATCH_SIZE,
+#     shuffle=True
+# )
+# data_loader_test = torch.utils.data.DataLoader(
+#     dataset=dataset_test,
+#     batch_size=BATCH_SIZE,
+#     shuffle=False
+# )
+
+
+#  TAKEN FROM TRANSFORMER.PY
 class DatasetCustom(torch.utils.data.Dataset):
     def __init__(self):
-        # if not os.path.exists(f'{PATH_DATA}/recipes_raw_nosource_epi.json'):
-        #     download_url_to_file('https://www.yellowrobot.xyz/share/recipes_raw_nosource_epi.json', progress=True)
-        #     doesn't work
-        #     download_url_to_file('https://www.kaggle.com/akmittal/quotes-dataset/download',
-        #     dst=f'{PATH_DATA}/a.zip', progress=True)
-        # with open(f'{PATH_DATA}/recipes_raw_nosource_epi.json') as fp:
-        #     data_json = json.load(fp)
-        with open(f'{PATH_DATA}/quotes.json', encoding="utf-8") as fp:
-            data_json = json.load(fp)
-
         self.sentences = []
-        self.lengths = []  # lengths of all sentences
+        self.lengths = []
         self.words_to_idxes = {}
         self.words_counts = {}
         self.idxes_to_words = {}
-
-        for quote_obj in data_json:
-            quote = quote_obj['Quote']
-            sentences = sent_tokenize(quote)
-            for sentence in sentences:
-                # split sentence into words and make them lowercase
-                words = str.split(sentence.lower())
-                # remove punctuation only at the end of word - e.x. "don't'" -> "don't"
-                words = [w[:-1] if str.isalpha(w[-1]) is False else w for w in words]
-                # filter out stop words
-                words = [w for w in words if w not in stop_words]
-                # filter one character tokens
-                words = [w for w in words if len(w) > 1]
-                # remove bad words i'm, i've, .., 10,00 (just didn't overcomplicate with other processing)
-                words = [w for w in words if w not in ["i'm", "i've", "..", "10,00"]]
-
-                if len(words) > MAX_SENTENCE_LEN:
-                    words = words[:MAX_SENTENCE_LEN]
-                if len(words) < MIN_SENTENCE_LEN:
-                    continue
-                sentence_tokens = []
-                for word in words:
-                    if word not in self.words_to_idxes:
-                        self.words_to_idxes[word] = len(self.words_to_idxes)
-                        self.idxes_to_words[self.words_to_idxes[word]] = word
-                        self.words_counts[word] = 0
-                    self.words_counts[word] += 1
-                    sentence_tokens.append(self.words_to_idxes[word])
-                self.sentences.append(sentence_tokens)
-                self.lengths.append(len(sentence_tokens))
-            if MAX_LEN is not None and len(self.sentences) > MAX_LEN:
-                break
-
-        # after checking freq dist removed characters
-        words_freq = dict(sorted(self.words_counts.items(), key=lambda item: item[1]))
-        n = 40
-        words = list(words_freq.keys())[-n:]
-        vals = list(words_freq.values())[-n:]
-        plt.barh(words, vals)
-        plt.show()
-        # sum(vals) = 375 now, before it was 1122
-
-        self.max_length = np.max(self.lengths) + 1  # longest sentence length + 1
+        self.max_length = 0
         self.end_token = '[END]'
-        self.words_to_idxes[self.end_token] = len(self.words_to_idxes)
-        self.idxes_to_words[self.words_to_idxes[self.end_token]] = self.end_token
-        self.words_counts[self.end_token] = len(self.sentences)
-
-        self.max_classes_tokens = len(self.words_to_idxes)  # unique words amount
-
-        word_counts = np.array(list(self.words_counts.values()))
-        self.weights = (1.0 / word_counts) * np.sum(word_counts) * 0.5  # more frequent word == smaller weight
-
-        print(f'self.sentences: {len(self.sentences)}')
-        print(f'self.max_length: {self.max_length}')
-        print(f'self.max_classes_tokens: {self.max_classes_tokens}')
-
-        print('Example sentences:')
-        samples = np.random.choice(self.sentences, 5)
-        for each in samples:
-            print(' '.join([self.idxes_to_words[it] for it in each]))
+        self.max_classes_tokens = len(self.words_to_idxes)
+        self.weights = 0
 
     def __len__(self):
+        if MAX_LEN:
+            return MAX_LEN
         return len(self.sentences)
 
     def __getitem__(self, idx):
-        # data - abcdef
-        # x - abcde<end>
-        # y - bcdef<end>
-
-        np_x_idxes = np.array(self.sentences[idx][:-1] + [self.words_to_idxes[self.end_token]])
+        np_x_idxes = np.array(self.sentences[idx] + [self.words_to_idxes[self.end_token]])
         np_x_padded = np.zeros((self.max_length, self.max_classes_tokens))
         np_x_padded[np.arange(len(np_x_idxes)), np_x_idxes] = 1.0
 
-        np_y_idxes = np.array(self.sentences[idx][1:] + [self.words_to_idxes[self.end_token]])
-        np_y_padded = np.zeros((self.max_length, self.max_classes_tokens))
-        np_y_padded[np.arange(len(np_y_idxes)), np_y_idxes] = 1.0
-
+        np_y_padded = np.roll(np_x_padded, shift=-1, axis=0)
         np_length = self.lengths[idx]
 
-        # print([self.idxes_to_words[idx] for idx in np_x_idxes])
-        # print([self.idxes_to_words[idx] for idx in np_y_idxes])
         return np_x_padded, np_y_padded, np_length
 
 
-# zero seed will result on having always same random split
+if not os.path.exists(f'{PATH_DATA}/dataset_full.pt'):
+    download_url_to_file('http://www.yellowrobot.xyz/share/dataset_full.pt', f'{PATH_DATA}/dataset_full.pt',
+                         progress=True)
+
+with open(f'{PATH_DATA}/dataset_full.pt', 'rb') as fp:
+    dataset_full = pickle.load(fp)
+
 torch.manual_seed(0)
-dataset_full = DatasetCustom()
 dataset_train, dataset_test = torch.utils.data.random_split(
     dataset_full, lengths=[int(len(dataset_full) * 0.8), len(dataset_full) - int(len(dataset_full) * 0.8)])
 torch.seed()
@@ -162,10 +216,11 @@ data_loader_train = torch.utils.data.DataLoader(
     shuffle=True
 )
 data_loader_test = torch.utils.data.DataLoader(
-    dataset=dataset_test,
+    dataset=dataset_train,
     batch_size=BATCH_SIZE,
     shuffle=False
 )
+########################################################################################
 
 
 class GRUCell(torch.nn.Module):
@@ -426,7 +481,7 @@ for epoch in range(1, EPOCHS + 1):
 
     if best_test_loss > loss.item():
         best_test_loss = loss.item()
-        torch.save(model.cpu().state_dict(), f'./old-results-corrupted/model-{epoch}.pt')
+        torch.save(model.cpu().state_dict(), f'./results/model-{epoch}.pt')
         model = model.to(DEVICE)
 
     plt.figure(figsize=(12, 5))
@@ -438,7 +493,7 @@ for epoch in range(1, EPOCHS + 1):
         c += 1
 
     plt.legend(plts, [it.get_label() for it in plts])
-    plt.savefig(f'./old-results-corrupted/epoch-{epoch}.png')
+    plt.savefig(f'./results/epoch-{epoch}.png')
     plt.show()
 
 """
