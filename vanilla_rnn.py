@@ -470,9 +470,9 @@ for epoch in range(1, EPOCHS + 1):
             y_prim_unpacked = y_prim_unpacked[0]
             x = x[0]
             y = y[0]
-            y_prim_idxes = np.argmax(y_prim_unpacked[:lengths_unpacked[0]].data.numpy(), axis=1).tolist()
-            x_idxes = np.argmax(x[:lengths_unpacked[0]].data.numpy(), axis=1).tolist()
-            y_idxes = np.argmax(y[:lengths_unpacked[0]].data.numpy(), axis=1).tolist()
+            y_prim_idxes = np.argmax(y_prim_unpacked[:lengths_unpacked[0]].cpu().data.numpy(), axis=1).tolist()
+            x_idxes = np.argmax(x[:lengths_unpacked[0]].cpu().data.numpy(), axis=1).tolist()
+            y_idxes = np.argmax(y[:lengths_unpacked[0]].cpu().data.numpy(), axis=1).tolist()
             print('Validation:')
             print('x: ' + ' '.join([dataset_full.idxes_to_words[it] for it in x_idxes]))
             print('y: ' + ' '.join([dataset_full.idxes_to_words[it] for it in y_idxes]))
