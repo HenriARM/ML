@@ -65,7 +65,7 @@ class ReplayPriorityMemory:
         probs = probs ** self.prob_alpha
         probs /= probs.sum()
 
-        indices = np.random.choice(len(self.memory), batch_size, p=probs)
+        indices = np.random.choice(len(self.memory), args.batch_size, p=probs)
         samples = [self.memory[idx] for idx in indices]
         return samples, indices
 
@@ -93,24 +93,6 @@ class Model(nn.Module):
         return self.layers.forward(s_t0)
 
 
-class ReplayMemory:
-    def __init__(self, size, batch_size):
-        self.size = size
-        self.batch_size = batch_size
-        self.memory = []
-
-    def push(self, transition):
-        self.memory.append(transition)
-        if len(self.memory) > self.size:
-            del self.memory[0]
-
-    def sample(self):
-        return random.sample(self.memory, self.batch_size)
-
-    def __len__(self):
-        return len(self.memory)
-
-
 class DQNAgent:
     def __init__(self, state_size, action_size):
         self.is_double = True
@@ -129,8 +111,7 @@ class DQNAgent:
             self.q_model.parameters(),
             lr=self.learning_rate,
         )
-
-        self.replay_memory = ReplayMemory(args.replay_buffer_size, args.batch_size)
+        self.replay_memory = ReplayPriorityMemory(args.replay_buffer_size, args.batch_size)
 
     def act(self, s_t0):
         if np.random.rand() <= self.epsilon:
@@ -151,7 +132,7 @@ class DQNAgent:
             self.epsilon *= self.epsilon_decay
 
         self.optimizer.zero_grad()
-        batch = self.replay_memory.sample()
+        batch, replay_idxes = self.replay_memory.sample()
         s_t0, a_t0, r_t1, s_t1, is_end = zip(*batch)
 
         s_t0 = torch.FloatTensor(s_t0).to(args.device)
@@ -170,7 +151,11 @@ class DQNAgent:
         q_t1 = q_t1_all[idxes, a_t1]
 
         q_t1_final = r_t1 + is_not_end * (args.gamma * q_t1)
-        loss = torch.mean((q_t0 - q_t1_final) ** 2)
+
+        td_error = (q_t0 - q_t1_final) ** 2
+        self.replay_memory.update_priorities(replay_idxes, td_error)
+
+        loss = torch.mean(td_error)
         loss.backward()
         self.optimizer.step()
 
