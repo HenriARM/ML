@@ -125,8 +125,6 @@ class DQNAgent:
                 return a_t0
 
     def replay(self):
-        # TODO: why epsilon is not getting smaller + how it decreased and went back at the start?
-
         # decay expoloration
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
