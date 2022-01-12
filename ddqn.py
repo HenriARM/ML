@@ -98,7 +98,7 @@ class Model(nn.Module):
         return self.layers.forward(s_t0)
 
 
-class DQNAgent:
+class DDQNAgent:
     def __init__(self, state_size, action_size):
         self.is_double = True
 
@@ -178,7 +178,7 @@ all_scores = []
 all_losses = []
 all_t = []
 
-agent = DQNAgent(
+agent = DDQNAgent(
     env.observation_space.shape[0],
     # first 2 are position in x axis and y axis(hieght) , other 2 are the x,y axis velocity terms,
     # lander angle and angular velocity, left and right left contact points (bool)
