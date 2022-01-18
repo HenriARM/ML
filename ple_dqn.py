@@ -124,8 +124,7 @@ class DQNAgent:
         self.epsilon_min = args.epsilon_min
         self.epsilon_decay = args.epsilon_decay
         self.learning_rate = args.learning_rate
-        self.device = args.device
-        self.q_model = Model(self.state_size, self.action_size, args.hidden_size).to(self.device)
+        self.q_model = Model(self.state_size, self.action_size, args.hidden_size).to(args.device)
 
         if args.is_inference:
             ckpts = []
@@ -133,7 +132,7 @@ class DQNAgent:
                 ckpts.append(file.split('-')[-1].split('.')[0])
             model_state = torch.load(os.path.join(args.run_path, f'model-{max(ckpts)}.pt'))
             self.q_model.load_state_dict(model_state)
-            self.q_model = self.q_model.eval().to(self.device)
+            self.q_model = self.q_model.eval().to(args.device)
             print(f'Model model-{max(ckpts)}.pt is loaded')
 
         self.optimizer = torch.optim.Adam(
