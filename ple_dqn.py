@@ -10,6 +10,9 @@ import glob
 import os
 import logging
 
+# for server
+# os.environ["SDL_VIDEODRIVER"] = "dummy"
+
 import matplotlib
 # this backend cant work with pyganme simultaneously
 # matplotlib.use('TkAgg')
@@ -18,7 +21,7 @@ import matplotlib.pyplot as plt
 time = int(time.time())
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-device', default='cuda', type=str)
+parser.add_argument('-device', default='cpu', type=str)
 parser.add_argument('-is_render', default=True, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument('-learning_rate', default=1e-3, type=float)
@@ -40,8 +43,8 @@ parser.add_argument('-is_inference', default=False, type=lambda x: (str(x).lower
 
 args, other_args = parser.parse_known_args()
 
-if not torch.cuda.is_available():
-    args.device = 'cpu'
+if torch.cuda.is_available():
+    args.device = 'cuda'
 
 if not os.path.exists(args.run_path):
     os.makedirs(args.run_path)
@@ -207,7 +210,7 @@ is_end = p.game_over()
 # best_terminal_time = 0
 for e in range(args.episodes):
     p.reset_game()
-    s_t0 = list(p.getGameState().values())
+    s_t0 = np.asarray(list(p.getGameState().values()), dtype=np.float32)
     reward_total = 0
     episode_loss = []
     for t in range(args.max_steps):
@@ -215,7 +218,7 @@ for e in range(args.episodes):
         a_t0 = p.getActionSet()[a_t0_idx]
         r_t1 = p.act(a_t0)
         is_end = p.game_over()
-        s_t1 = list(p.getGameState().values())
+        s_t1 = np.asarray(list(p.getGameState().values()), dtype=np.float32)
 
         reward_total += r_t1
         if r_t1 != 0:
