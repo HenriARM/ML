@@ -2,7 +2,7 @@ import os
 import shutil
 import time
 
-import gym #  pip install git+https://github.com/openai/gym
+import gym  # pip install git+https://github.com/openai/gym
 import argparse
 import numpy as np
 import torch
@@ -14,7 +14,7 @@ import random
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-device', default='cuda', type=str)
-parser.add_argument('-is_render', default=('HEADLESS' not in os.environ), type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-is_render', default=False, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument('-learning_rate', default=1e-3, type=float)
 parser.add_argument('-batch_size', default=128, type=int)
@@ -33,9 +33,11 @@ parser.add_argument('-max_steps', default=500, type=int)
 args, other_args = parser.parse_known_args()
 
 import matplotlib
+
 if args.is_render:
     matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
+
 plt.style.use('dark_background')
 
 if not torch.cuda.is_available():
@@ -48,16 +50,27 @@ if not args.is_render:
         shutil.rmtree(RUN_PATH)
     os.makedirs(RUN_PATH)
 
+
 class Model(nn.Module):
     def __init__(self, state_size, action_size, hidden_size):
         super(Model, self).__init__()
 
         self.layers = torch.nn.Sequential(
+            torch.nn.Linear(in_features=state_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=action_size),
+            torch.nn.BatchNorm1d(num_features=action_size),
+            torch.nn.Softmax(dim=-1)
         )
-        #TODO
 
         param_count = np.sum([np.prod(np.array(it.size())) for it in self.parameters()])
-        print(f'param_count: {param_count}')
+        print(f'param_count: {param_count}')  # at least 100k params
 
     def forward(self, s_t0):
         return self.layers.forward(s_t0)
@@ -83,7 +96,6 @@ class ReplayPriorityMemory:
             del self.Rs[0]
         pos = len(self.memory) - 1
         self.priorities[pos] = new_priority
-
 
     def sample(self):
         probs = np.array(self.priorities)
@@ -115,7 +127,7 @@ class PGAgent:
         self.state_size = state_size
         self.action_size = action_size
 
-        self.gamma = args.gamma    # discount rate
+        self.gamma = args.gamma  # discount rate
         self.epsilon = args.epsilon  # exploration rate
         self.epsilon_min = args.epsilon_min
         self.epsilon_decay = args.epsilon_decay
@@ -156,10 +168,10 @@ class PGAgent:
         r_c = torch.FloatTensor(r_c).to(args.device)
 
         self.p_model = self.p_model.train()
-        a_all = self.p_model.forward(s_t0)
+        a_all_probs = self.p_model.forward(s_t0)
 
-        #TODO
-        loss = 0
+        a_t = a_all_probs[range(len(a_t0)), a_t0]
+        loss = -R * torch.log(a_t + 1e-8)
 
         self.replay_memory.update_priorities(batch_idxes, loss)
         loss = torch.mean(loss)
@@ -167,6 +179,7 @@ class PGAgent:
         self.optimizer.step()
 
         return loss.cpu().item()
+
 
 # environment name
 env = gym.make('LunarLander-v2')
@@ -177,12 +190,14 @@ all_losses = []
 all_t = []
 
 agent = PGAgent(
-    env.observation_space.shape[0], # first 2 are position in x axis and y axis(hieght) , other 2 are the x,y axis velocity terms, lander angle and angular velocity, left and right left contact points (bool)
+    env.observation_space.shape[0],
+    # first 2 are position in x axis and y axis(hieght) ,
+    # other 2 are the x,y axis velocity terms, lander angle and angular velocity,
+    # left and right left contact points (bool)
     env.action_space.n
 )
 is_end = False
 PLOT_REFRESH_RATE = 10
-
 
 for e in range(args.episodes):
     s_t0 = env.reset()
@@ -199,7 +214,7 @@ for e in range(args.episodes):
 
         reward_total += r_t1
 
-        if t == args.max_steps-1:
+        if t == args.max_steps - 1:
             is_end = True
 
         transitions.append([s_t0, a_t0, r_t1])
@@ -210,8 +225,14 @@ for e in range(args.episodes):
                 all_scores.append(reward_total)
             break
 
-    #TODO add to replay memory transitions
-    # agent.replay_memory.push(tr)
+    for t in range(len(transitions)):
+        R = 0
+        for t_c, (s_t0, a_t0, r_t) in enumerate(transitions[t:]):
+            R += args.gamma ** t_c * r_t
+
+        s_t0, a_t0, r_t1 = transitions[t]
+        tr = [s_t0, a_t0, R]
+        agent.replay_memory.push(tr)
 
     loss = 0
     if len(agent.replay_memory) > args.batch_size:
