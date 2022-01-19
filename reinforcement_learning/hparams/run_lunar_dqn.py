@@ -35,8 +35,8 @@ parser.add_argument('-device', default='cpu', type=str)
 parser.add_argument('-is_render', default=True, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument('-learning_rate', default=1e-3, type=float)
-parser.add_argument('-batch_size', default=1, type=int)
-parser.add_argument('-episodes', default=100, type=int)
+parser.add_argument('-batch_size', default=128, type=int)
+parser.add_argument('-episodes', default=10000, type=int)
 parser.add_argument('-replay_buffer_size', default=5000, type=int)
 
 parser.add_argument('-hidden_size', default=128, type=int)
