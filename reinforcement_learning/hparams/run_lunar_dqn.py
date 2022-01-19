@@ -32,7 +32,7 @@ time = int(time.time())
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-device', default='cpu', type=str)
-parser.add_argument('-is_render', default=True, type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-is_render', default=False, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument('-learning_rate', default=1e-3, type=float)
 parser.add_argument('-batch_size', default=128, type=int)
