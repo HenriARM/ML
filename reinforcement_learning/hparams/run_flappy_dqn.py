@@ -39,7 +39,7 @@ parser.add_argument('-epsilon_decay', default=0.999, type=float)
 parser.add_argument('-max_steps', default=100000, type=int)  # specific to the game
 parser.add_argument('-is_inference', default=False, type=lambda x: (str(x).lower() == 'true'))
 
-parser.add_argument('-is_csv', default=False, type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-is_csv', default=True, type=lambda x: (str(x).lower() == 'true'))
 parser.add_argument('-run_name', default=f'run_{time}', type=str)
 parser.add_argument('-sequence_name', default=f'seq', type=str)
 
