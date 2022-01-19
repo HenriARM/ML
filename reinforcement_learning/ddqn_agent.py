@@ -22,8 +22,8 @@ class DDQNAgent:
         self.epsilon_min = args.epsilon_min
         self.epsilon_decay = args.epsilon_decay
         self.learning_rate = args.learning_rate
-        self.q_model = Model(self.state_size, self.action_size, args.hidden_size).to(args.device)
-        self.q_t_model = Model(self.state_size, self.action_size, args.hidden_size).to(args.device)
+        self.q_model = QModel(self.state_size, self.action_size, args.hidden_size).to(args.device)
+        self.q_t_model = QModel(self.state_size, self.action_size, args.hidden_size).to(args.device)
         self.update_q_t_model()
 
         if args.is_inference:
@@ -46,7 +46,7 @@ class DDQNAgent:
 
     def act(self, s_t0):
         if np.random.rand() <= self.epsilon:
-            return env.action_space.sample()
+            return np.random.randint(self.action_size)
         else:
             with torch.no_grad():
                 s_t0 = torch.FloatTensor(s_t0).to(self.device)
