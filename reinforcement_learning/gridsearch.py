@@ -1,14 +1,23 @@
 import subprocess
 import itertools
+import json
 
-script_name = './reinforcement_learning/ple_dqn'
+# Example of script name and hparams grid name
+script_path = './reinforcement_learning/flappy_dqn'
+hparams_path = './reinforcement_learning/hparams/flappy_dqn.json'
 
 # Grid search
+'''
+Example of grid
 grid = {
     'sequence_name': ['flappy_dqn'],
     'batch_size': [32, 64],
     'learning_rate': [1E-4, 1E-3]
 }
+'''
+
+with open(hparams_path) as json_file:
+    grid = json.load(json_file)
 
 
 def main():
@@ -17,7 +26,7 @@ def main():
         grid_comb = dict(zip(grid.keys(), values))
         for hparam in grid_comb:
             params.append(f'-{hparam}={grid_comb[hparam]}')
-        p = subprocess.Popen(['python', f'{script_name}.py', *params])
+        p = subprocess.Popen(['python', f'{script_path}.py', *params])
         p.wait()
 
 
