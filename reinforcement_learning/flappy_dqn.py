@@ -219,6 +219,7 @@ def run():
         p.reset_game()
         s_t0 = np.asarray(list(p.getGameState().values()), dtype=np.float32)
         reward_total = 0
+        pipes = 0
         episode_loss = []
         for t in range(args.max_steps):
             a_t0_idx = agent.act(s_t0)
@@ -228,8 +229,19 @@ def run():
             s_t1 = np.asarray(list(p.getGameState().values()), dtype=np.float32)
 
             reward_total += r_t1
-            if r_t1 != 0:
-                pass
+
+            '''
+            from /PyGame-Learning-Environment/ple/games/base/pygamewrapper.py
+            self.rewards = {
+            "positive": 1.0,
+            "negative": -1.0,
+            "tick": 0,
+            "loss": -5.0,
+            "win": 5.0
+            }
+            '''
+            if r_t1 == 1.0:
+                pipes += 1
 
             if t == args.max_steps - 1:
                 r_t1 = -100
@@ -257,7 +269,8 @@ def run():
             'loss': all_losses[-1],
             'score': reward_total,
             't': t,
-            'e': agent.epsilon
+            'e': agent.epsilon,
+            'pipes': pipes
         }
 
         if args.is_csv is True:

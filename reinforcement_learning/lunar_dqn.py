@@ -190,6 +190,7 @@ for e in range(args.episodes):
     s_t0 = env.reset()
     reward_total = 0
     episode_loss = []
+    is_win = False
     for t in range(args.max_steps):
         if args.is_render and len(all_scores):  # and all_scores[-1] > 0:
             # if e % 10 == 0 and all_scores[-1] > 0:
@@ -215,6 +216,12 @@ for e in range(args.episodes):
         if is_end:
             all_scores.append(reward_total)
             all_losses.append(np.mean(episode_loss))
+            '''
+            if terminal reward is =100 => landed
+            https://github.com/openai/gym/blob/master/gym/envs/box2d/lunar_lander.py#L381
+            '''
+            if r_t1 >= 100:
+                is_win = True
             break
 
     all_t.append(t)
