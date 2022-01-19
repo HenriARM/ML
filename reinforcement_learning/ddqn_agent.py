@@ -7,7 +7,7 @@ from reinforcement_learning.q_model import QModel
 from reinforcement_learning.replay_priority_memory import ReplayPriorityMemory
 
 
-class DQNAgent:
+class DDQNAgent:
     def __init__(self, state_size, action_size, args):
         self.device = args.device
         self.is_inference = args.is_inference
@@ -22,7 +22,9 @@ class DQNAgent:
         self.epsilon_min = args.epsilon_min
         self.epsilon_decay = args.epsilon_decay
         self.learning_rate = args.learning_rate
-        self.q_model = QModel(self.state_size, self.action_size, args.hidden_size).to(args.device)
+        self.q_model = Model(self.state_size, self.action_size, args.hidden_size).to(args.device)
+        self.q_t_model = Model(self.state_size, self.action_size, args.hidden_size).to(args.device)
+        self.update_q_t_model()
 
         if args.is_inference:
             ckpts = []
@@ -39,9 +41,12 @@ class DQNAgent:
         )
         self.replay_memory = ReplayPriorityMemory(args.replay_buffer_size, args.batch_size)
 
+    def update_q_t_model(self):
+        self.q_t_model.load_state_dict(self.q_model.state_dict())
+
     def act(self, s_t0):
         if np.random.rand() <= self.epsilon:
-            return np.random.randint(self.action_size)
+            return env.action_space.sample()
         else:
             with torch.no_grad():
                 s_t0 = torch.FloatTensor(s_t0).to(self.device)
@@ -55,9 +60,7 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-        if not self.is_inference:
-            self.optimizer.zero_grad()
-
+        self.optimizer.zero_grad()
         batch, replay_idxes = self.replay_memory.sample()
         s_t0, a_t0, r_t1, s_t1, is_end = zip(*batch)
 
@@ -72,7 +75,7 @@ class DQNAgent:
         q_t0_all = self.q_model.forward(s_t0)
         q_t0 = q_t0_all[idxes, a_t0]
 
-        q_t1_all = self.q_model.forward(s_t1)
+        q_t1_all = self.q_t_model.forward(s_t1)
         a_t1 = q_t1_all.argmax(dim=1)  # dim = 0 is batch_size
         q_t1 = q_t1_all[idxes, a_t1]
 
@@ -82,8 +85,7 @@ class DQNAgent:
         self.replay_memory.update_priorities(replay_idxes, td_error)
 
         loss = torch.mean(td_error)
-        if not self.is_inference:
-            loss.backward()
-            self.optimizer.step()
+        loss.backward()
+        self.optimizer.step()
 
         return loss.cpu().item()
