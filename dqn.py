@@ -10,15 +10,25 @@ import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
-# !pip3 install box2d-py
-# pip install pyglet
+'''
+# mac os
+pip install git+https://github.com/openai/gym
+pip install box2d-py
+pip install pyglet
+
+# for server
+conda install -c conda-forge gym https://anaconda.org/conda-forge/GYM
+conda install -c conda-forge swig https://anaconda.org/conda-forge/swig
+pip install box2d-py
+pip install pyglet
+'''
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-device', default='cuda', type=str)
-parser.add_argument('-is_render', default=True, type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-is_render', default=False, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument('-learning_rate', default=1e-3, type=float)
-parser.add_argument('-batch_size', default=128, type=int)
+parser.add_argument('-batch_size', default=1, type=int)
 parser.add_argument('-episodes', default=10000, type=int)
 parser.add_argument('-replay_buffer_size', default=5000, type=int)
 
