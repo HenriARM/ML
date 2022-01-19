@@ -16,7 +16,7 @@ import glob
 import os
 import logging
 
-from reinforcement_learning.csv_utils import CsvUtils
+from csv_utils import CsvUtils
 
 # for server
 # os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -26,7 +26,7 @@ import matplotlib
 # matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
-from reinforcement_learning.ddqn_agent import DDQNAgent
+from ddqn_agent import DDQNAgent
 
 time = int(time.time())
 

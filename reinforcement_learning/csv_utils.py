@@ -5,7 +5,7 @@ import logging
 import sys
 import traceback
 import numpy as np
-from reinforcement_learning.file_utils import FileUtils
+from file_utils import FileUtils
 
 
 class CsvUtils:

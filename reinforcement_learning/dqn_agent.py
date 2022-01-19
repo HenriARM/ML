@@ -3,8 +3,8 @@ import glob
 import numpy as np
 import torch
 
-from reinforcement_learning.q_model import QModel
-from reinforcement_learning.replay_priority_memory import ReplayPriorityMemory
+from q_model import QModel
+from replay_priority_memory import ReplayPriorityMemory
 
 
 class DQNAgent:

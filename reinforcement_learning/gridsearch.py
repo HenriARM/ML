@@ -3,8 +3,8 @@ import itertools
 import json
 
 # Example of script name and hparams grid name
-script_path = './reinforcement_learning/hparams/run_flappy_dqn'
-hparams_path = './reinforcement_learning/hparams/flappy_dqn.json'
+script_path = './run_flappy_dqn.py'
+hparams_path = './flappy_dqn.json'
 
 # Grid search
 '''
@@ -26,7 +26,7 @@ def main():
         grid_comb = dict(zip(grid.keys(), values))
         for hparam in grid_comb:
             params.append(f'-{hparam}={grid_comb[hparam]}')
-        p = subprocess.Popen(['python', f'{script_path}.py', *params])
+        p = subprocess.Popen(['python', script_path, *params])
         p.wait()
 
 

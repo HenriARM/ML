@@ -6,14 +6,14 @@ import time
 import logging
 import numpy as np
 
-from reinforcement_learning.csv_utils import CsvUtils
+from csv_utils import CsvUtils
 
 import matplotlib
 
 # matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
-from reinforcement_learning.dqn_agent import DQNAgent
+from dqn_agent import DQNAgent
 
 '''
 # mac os
