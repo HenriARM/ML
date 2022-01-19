@@ -11,6 +11,8 @@ import glob
 import os
 import logging
 
+from csv_utils import CsvUtils
+
 # for server
 # os.environ["SDL_VIDEODRIVER"] = "dummy"
 
@@ -23,7 +25,7 @@ time = int(time.time())
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-device', default='cpu', type=str)
-parser.add_argument('-is_render', default=True, type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-is_render', default=False, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument('-learning_rate', default=1e-3, type=float)
 parser.add_argument('-batch_size', default=128, type=int)
@@ -38,23 +40,28 @@ parser.add_argument('-epsilon_min', default=0.1, type=float)
 parser.add_argument('-epsilon_decay', default=0.999, type=float)
 
 parser.add_argument('-max_steps', default=100000, type=int)  # specific to the game
-parser.add_argument('-run_path', default=f'dqn_{time}', type=str)
 parser.add_argument('-is_inference', default=False, type=lambda x: (str(x).lower() == 'true'))
 
+parser.add_argument('-is_csv', default=True, type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-run_name', default=f'run_{time}', type=str)
+parser.add_argument('-sequence_name', default=f'seq', type=str)
+
 args, other_args = parser.parse_known_args()
+
+seq_run_name = os.path.join(f'{args.sequence_name}', args.run_name)
 
 if torch.cuda.is_available():
     args.device = 'cuda'
 
-if not os.path.exists(args.run_path):
-    os.makedirs(args.run_path)
+if not os.path.exists(args.sequence_name):
+    os.makedirs(args.sequence_name)
 
-logging.basicConfig(level=logging.INFO, filename=f'dqn_{time}/logs.txt', filemode='a+',
+if not os.path.exists(seq_run_name):
+    os.makedirs(seq_run_name)
+
+logging.basicConfig(level=logging.INFO, filename=os.path.join(seq_run_name, 'logs.txt'), filemode='a+',
                     format='%(asctime)-15s %(levelname)-8s %(message)s')
 
-
-# else:
-# shutil.rmtree(args.run_path)
 
 
 class ReplayPriorityMemory:
@@ -128,12 +135,12 @@ class DQNAgent:
 
         if args.is_inference:
             ckpts = []
-            for file in glob.glob(os.path.join(args.run_path, '*.pt')):
+            for file in glob.glob(os.path.join(seq_run_name, '*.pt')):
                 ckpts.append(file.split('-')[-1].split('.')[0])
-            model_state = torch.load(os.path.join(args.run_path, f'model-{max(ckpts)}.pt'))
+            model_state = torch.load(os.path.join(seq_run_name, f'model-{max(ckpts)}.pt'))
             self.q_model.load_state_dict(model_state)
             self.q_model = self.q_model.eval().to(args.device)
-            print(f'Model model-{max(ckpts)}.pt is loaded')
+            logging.info(f'Model model-{max(ckpts)}.pt is loaded')
 
         self.optimizer = torch.optim.Adam(
             self.q_model.parameters(),
@@ -222,7 +229,7 @@ def run():
 
             reward_total += r_t1
             if r_t1 != 0:
-                print(f'reward = {r_t1}')
+                pass
 
             if t == args.max_steps - 1:
                 r_t1 = -100
@@ -245,13 +252,26 @@ def run():
                 break
 
         all_t.append(t)
-        msg = f'episode: {e}/{args.episodes} ' \
-              f'loss: {all_losses[-1]} ' \
-              f'score: {reward_total} ' \
-              f't: {t} ' \
-              f'e: {agent.epsilon}'
-        logging.info(msg)
-        print(msg)
+
+        metrics_episode = {
+            'loss': all_losses[-1],
+            'score': reward_total,
+            't': t,
+            'e': agent.epsilon
+        }
+
+        if args.is_csv is True:
+            CsvUtils.add_hparams(
+                sequence_dir=os.path.join('.', args.sequence_name),
+                sequence_name=args.sequence_name,
+                run_name=args.run_name,
+                args_dict=args.__dict__,
+                metrics_dict=metrics_episode,
+                global_step=e
+            )
+        else:
+            logging.info(f'episode: {e}/{args.episodes} ', metrics_episode)
+            print(f'episode: {e}/{args.episodes} ', metrics_episode)
 
         if e % 100 == 0 and not args.is_inference:
             # save logs, graphics and weights during training
@@ -270,12 +290,12 @@ def run():
             plt.plot(all_t)
 
             plt.xlabel('Episode')
-
-            plt.savefig(f'{args.run_path}/plt-{e}.png')
-            torch.save(agent.q_model.cpu().state_dict(), f'{args.run_path}/model-{e}.pt')
+            plt.savefig(os.path.join(seq_run_name, f'plt-{e}.png'))
+            torch.save(agent.q_model.cpu().state_dict(), os.path.join(seq_run_name, f'model-{e}.pt'))
 
 
 def main():
+    logging.info(f'Hyperparams {args}')
     print(f'Hyperparams {args}')
     print(f'module name: {__name__}')
     print(f'parent process: {os.getppid()}')

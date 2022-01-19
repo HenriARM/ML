@@ -5,8 +5,9 @@ script_name = './reinforcement_learning/ple_dqn'
 
 # Grid search
 grid = {
+    'sequence_name': ['flappy_dqn'],
     'batch_size': [32, 64],
-    'learning_rate': [1E-4, 1E-3, 1E-2]
+    'learning_rate': [1E-4, 1E-3]
 }
 
 
