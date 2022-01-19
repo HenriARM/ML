@@ -45,7 +45,7 @@ parser.add_argument('-sequence_name', default=f'seq', type=str)
 
 args, other_args = parser.parse_known_args()
 
-seq_run_name = os.path.join(f'{args.sequence_name}', args.run_name)
+seq_run_name = os.path.join('.', args.sequence_name, args.run_name)
 
 # if torch.cuda.is_available():
 #     args.device = 'cuda'
@@ -76,7 +76,6 @@ def run():
     agent = DQNAgent(len(p.getGameState()), len(p.getActionSet()), args)
     is_end = p.game_over()
 
-    # best_terminal_time = 0
     for e in range(args.episodes):
         p.reset_game()
         s_t0 = np.asarray(list(p.getGameState().values()), dtype=np.float32)
@@ -121,8 +120,6 @@ def run():
             if is_end:
                 all_scores.append(reward_total)
                 all_losses.append(np.mean(episode_loss))
-                # if t > best_terminal_time:
-                #     best_terminal_time = t
                 break
 
         all_t.append(t)
