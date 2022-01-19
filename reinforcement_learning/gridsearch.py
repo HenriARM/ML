@@ -3,7 +3,7 @@ import itertools
 import json
 
 # Example of script name and hparams grid name
-script_path = './reinforcement_learning/flappy_dqn'
+script_path = './reinforcement_learning/hparams/run_flappy_dqn'
 hparams_path = './reinforcement_learning/hparams/flappy_dqn.json'
 
 # Grid search
