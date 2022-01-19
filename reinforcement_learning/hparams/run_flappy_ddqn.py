@@ -16,7 +16,7 @@ import glob
 import os
 import logging
 
-from csv_utils import CsvUtils
+from reinforcement_learning.csv_utils import CsvUtils
 
 # for server
 # os.environ["SDL_VIDEODRIVER"] = "dummy"
