@@ -1,6 +1,6 @@
 {
-    "sequence_name": ["flappy_dqn"],
-    "batch_size": [64,  128],
+    "sequence_name": ["lunar_dqn"],
+    "batch_size": [128],
     "learning_rate": [0.01, 0.001],
     "hidden_size": [128, 256],
     "gamma": [0.6, 0.9],
