@@ -1,0 +1,8 @@
+{
+    "sequence_name": ["flappy_a2c"],
+    "batch_size": [64,  128],
+    "learning_rate": [0.01, 0.001],
+    "hidden_size": [256, 512],
+    "gamma": [0.9],
+    "epsilon_decay": [0.999]
+}

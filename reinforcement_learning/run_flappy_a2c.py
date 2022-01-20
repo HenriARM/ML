@@ -31,7 +31,7 @@ parser.add_argument('-is_render', default=False, type=lambda x: (str(x).lower() 
 parser.add_argument('-learning_rate', default=1e-3, type=float)
 parser.add_argument('-batch_size', default=128, type=int)
 parser.add_argument('-episodes', default=10000, type=int)
-parser.add_argument('-replay_buffer_size', default=10000, type=int)
+parser.add_argument('-replay_buffer_size', default=20000, type=int)
 
 parser.add_argument('-hidden_size', default=512, type=int)
 
@@ -64,9 +64,9 @@ logging.basicConfig(level=logging.INFO, filename=os.path.join(seq_run_name, 'log
                     format='%(asctime)-15s %(levelname)-8s %(message)s')
 
 
-class Model(nn.Module):
+class ModelActor(nn.Module):
     def __init__(self, state_size, action_size, hidden_size):
-        super(Model, self).__init__()
+        super().__init__()
 
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(in_features=state_size, out_features=hidden_size),
@@ -81,8 +81,25 @@ class Model(nn.Module):
             torch.nn.Softmax(dim=-1)
         )
 
-        param_count = np.sum([np.prod(np.array(it.size())) for it in self.parameters()])
-        print(f'param_count: {param_count}')  # at least 100k params
+    def forward(self, s_t0):
+        return self.layers.forward(s_t0)
+
+
+class ModelCritic(nn.Module):
+    def __init__(self, state_size, action_size, hidden_size):
+        super().__init__()
+
+        self.layers = torch.nn.Sequential(
+            torch.nn.Linear(in_features=state_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=1)
+        )
 
     def forward(self, s_t0):
         return self.layers.forward(s_t0)
@@ -132,7 +149,7 @@ class ReplayPriorityMemory:
         return len(self.memory)
 
 
-class PGAgent:
+class A2CAgent:
     def __init__(self, state_size, action_size):
         self.is_double = True
 
@@ -145,9 +162,16 @@ class PGAgent:
         self.epsilon_decay = args.epsilon_decay
         self.learning_rate = args.learning_rate
         self.device = args.device
-        self.p_model = Model(self.state_size, self.action_size, args.hidden_size).to(self.device)
-        self.optimizer = torch.optim.Adam(
-            self.p_model.parameters(),
+
+        self.model_a = ModelActor(self.state_size, self.action_size, args.hidden_size).to(self.device)
+        self.model_c = ModelCritic(self.state_size, self.action_size, args.hidden_size).to(self.device)
+
+        self.optimizer_a = torch.optim.Adam(
+            self.model_a.parameters(),
+            lr=self.learning_rate,
+        )
+        self.optimizer_c = torch.optim.Adam(
+            self.model_c.parameters(),
             lr=self.learning_rate,
         )
 
@@ -160,8 +184,8 @@ class PGAgent:
             with torch.no_grad():
                 s_t0 = torch.FloatTensor(s_t0).to(args.device)
                 s_t0 = s_t0.unsqueeze(dim=0)
-                self.p_model = self.p_model.eval()
-                q_all = self.p_model.forward(s_t0)
+                self.model_a = self.model_a.eval()
+                q_all = self.model_a.forward(s_t0)
                 a_t0 = q_all.squeeze().argmax().cpu().item()
                 return a_t0
 
@@ -171,26 +195,35 @@ class PGAgent:
             self.epsilon *= self.epsilon_decay
 
         batch, batch_idxes = self.replay_memory.sample()
-        self.optimizer.zero_grad()
+        self.optimizer_a.zero_grad()
+        self.optimizer_c.zero_grad()
 
-        s_t0, a_t0, R = zip(*batch)
+        s_t0, a_t0, delta = zip(*batch)
 
         s_t0 = torch.FloatTensor(s_t0).to(args.device)
         a_t0 = torch.LongTensor(a_t0).to(args.device)
-        R = torch.FloatTensor(R).to(args.device)
+        delta = torch.FloatTensor(delta).to(args.device)
 
-        self.p_model = self.p_model.train()
-        a_all_probs = self.p_model.forward(s_t0)
+        v_t = self.model_c.forward(s_t0).squeeze()
+        A = delta - v_t
 
-        a_t = a_all_probs[range(len(a_t0)), a_t0]
-        loss = -R * torch.log(a_t + 1e-8)
+        loss_c = A ** 2
+        loss_c_mean = torch.mean(loss_c)
+        loss_c_mean.backward()
+        self.optimizer_c.step()
 
-        self.replay_memory.update_priorities(batch_idxes, loss)
-        loss = torch.mean(loss)
-        loss.backward()
-        self.optimizer.step()
+        self.model_a = self.model_a.train()
+        a_all = self.model_a.forward(s_t0)
+        a_t = a_all[range(len(a_t0)), a_t0]
 
-        return loss.cpu().item()
+        loss_a = -A.detach() * torch.log(a_t + 1e-8)
+        loss_a_mean = torch.mean(loss_a)
+        loss_a_mean.backward()
+        self.optimizer_a.step()
+
+        self.replay_memory.update_priorities(batch_idxes, loss_a)
+
+        return loss_a_mean.item(), loss_c_mean.item()
 
 
 def run():
@@ -203,9 +236,11 @@ def run():
 
     all_scores = []
     all_losses = []
+    all_losses_a = []
+    all_losses_c = []
     all_t = []
 
-    agent = PGAgent(len(p.getGameState()), len(p.getActionSet()))
+    agent = A2CAgent(len(p.getGameState()), len(p.getActionSet()))
     is_end = p.game_over()
 
     for e in range(args.episodes):
@@ -215,46 +250,54 @@ def run():
         pipes = 0
 
         transitions = []
+        states_t1 = []
+        end_t1 = []
         for t in range(args.max_steps):
             a_t0_idx = agent.act(s_t0)
             a_t0 = p.getActionSet()[a_t0_idx]
             r_t1 = p.act(a_t0)
             is_end = p.game_over()
             s_t1 = np.asarray(list(p.getGameState().values()), dtype=np.float32)
+            end_t1.append(is_end)
             reward_total += r_t1
 
             if r_t1 == 1.0:
                 pipes += 1
 
-            if t == args.max_steps - 1:
-                r_t1 = -100
-                is_end = True
-
             transitions.append([s_t0, a_t0_idx, r_t1])
+            states_t1.append(s_t1)
             s_t0 = s_t1
 
             if is_end:
                 all_scores.append(reward_total)
                 break
 
+        t_states_t1 = torch.FloatTensor(states_t1).to(args.device)
+        v_t1 = agent.model_c.forward(t_states_t1)
+        np_v_t1 = v_t1.cpu().data.numpy().squeeze()
         for t in range(len(transitions)):
-            R = 0
-            for t_c, (s_t0, a_t0_idx, r_t) in enumerate(transitions[t:]):
-                R += args.gamma ** t_c * r_t
-
             s_t0, a_t0_idx, r_t1 = transitions[t]
-            tr = [s_t0, a_t0_idx, R]
-            agent.replay_memory.push(tr)
+            is_end = end_t1[t]
+            delta = r_t1
+            if not is_end:
+                delta = r_t1 + args.gamma * np_v_t1[t]
+            agent.replay_memory.push([s_t0, a_t0_idx, delta])
 
-        loss = 0
+        loss = loss_a = loss_c = 0
         if len(agent.replay_memory) > args.batch_size:
-            loss = agent.replay()
+            loss_a, loss_c = agent.replay()
+            loss = loss_a + loss_c
+
             all_losses.append(loss)
+            all_losses_a.append(loss_a)
+            all_losses_c.append(loss_c)
 
         all_t.append(t)
 
         metrics_episode = {
             'loss': loss,
+            'loss_a': loss_a,
+            'loss_c': loss_c,
             'score': reward_total,
             't': t,
             'e': agent.epsilon,
@@ -274,28 +317,33 @@ def run():
             logging.info(f'episode: {e}/{args.episodes} ', metrics_episode)
             print(f'episode: {e}/{args.episodes} ', metrics_episode)
 
-
-        if e % 100 == 0 and not args.is_inference:
-            # save logs, graphics and weights during training
+        if e % 100 == 0:
             plt.clf()
 
-            plt.subplot(3, 1, 1)
+            plt.subplot(5, 1, 1)
             plt.ylabel('Score')
             plt.plot(all_scores)
 
-            plt.subplot(3, 1, 2)
+            plt.subplot(5, 1, 2)
             plt.ylabel('Loss')
             plt.plot(all_losses)
 
-            plt.subplot(3, 1, 3)
+            plt.subplot(5, 1, 3)
+            plt.ylabel('Loss Actor')
+            plt.plot(all_losses_a)
+
+            plt.subplot(5, 1, 4)
+            plt.ylabel('Loss Critic')
+            plt.plot(all_losses_c)
+
+            plt.subplot(5, 1, 5)
             plt.ylabel('Steps')
             plt.plot(all_t)
 
             plt.xlabel('Episode')
             plt.savefig(os.path.join(seq_run_name, f'plt-{e}.png'))
-            torch.save(agent.p_model.cpu().state_dict(), os.path.join(seq_run_name, f'model-{e}.pt'))
-
-
+            torch.save(agent.model_c.cpu().state_dict(), os.path.join(seq_run_name, f'model-{e}-c.pt'))
+            torch.save(agent.model_a.cpu().state_dict(), os.path.join(seq_run_name, f'model-{e}-a.pt'))
 
 
 def main():
