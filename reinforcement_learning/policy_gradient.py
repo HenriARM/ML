@@ -65,7 +65,6 @@ class Model(nn.Module):
             torch.nn.LeakyReLU(),
 
             torch.nn.Linear(in_features=hidden_size, out_features=action_size),
-            torch.nn.BatchNorm1d(num_features=action_size),
             torch.nn.Softmax(dim=-1)
         )
 
@@ -161,11 +160,11 @@ class PGAgent:
         batch, batch_idxes = self.replay_memory.sample()
         self.optimizer.zero_grad()
 
-        s_t0, a_t0, r_c = zip(*batch)
+        s_t0, a_t0, R = zip(*batch)
 
         s_t0 = torch.FloatTensor(s_t0).to(args.device)
         a_t0 = torch.LongTensor(a_t0).to(args.device)
-        r_c = torch.FloatTensor(r_c).to(args.device)
+        R = torch.FloatTensor(R).to(args.device)
 
         self.p_model = self.p_model.train()
         a_all_probs = self.p_model.forward(s_t0)
@@ -206,9 +205,9 @@ for e in range(args.episodes):
     transitions = []
     for t in range(args.max_steps):
         if args.is_render and len(all_scores):
-            if e % PLOT_REFRESH_RATE == 0 and all_scores[-1] > 100:
-                env.render()
-                time.sleep(0.01)
+            # if e % PLOT_REFRESH_RATE == 0 and all_scores[-1] > 100:
+            env.render()
+            time.sleep(0.01)
         a_t0 = agent.act(s_t0)
         s_t1, r_t1, is_end, _ = env.step(a_t0)
 
