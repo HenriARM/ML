@@ -2,7 +2,7 @@ import os
 import shutil
 import time
 
-import gym #  pip install git+https://github.com/openai/gym
+import gym  # pip install git+https://github.com/openai/gym
 import argparse
 import numpy as np
 import torch
@@ -14,7 +14,7 @@ import random
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-device', default='cuda', type=str)
-parser.add_argument('-is_render', default=('HEADLESS' not in os.environ), type=lambda x: (str(x).lower() == 'true'))
+parser.add_argument('-is_render', default=False, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument('-learning_rate', default=1e-4, type=float)
 parser.add_argument('-batch_size', default=128, type=int)
@@ -33,9 +33,11 @@ parser.add_argument('-max_steps', default=200, type=int)
 args, other_args = parser.parse_known_args()
 
 import matplotlib
+
 if args.is_render:
     matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
+
 plt.style.use('dark_background')
 
 if not torch.cuda.is_available():
@@ -54,8 +56,17 @@ class ModelActor(nn.Module):
         super().__init__()
 
         self.layers = torch.nn.Sequential(
+            torch.nn.Linear(in_features=state_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=action_size),
+            torch.nn.Softmax(dim=-1)
         )
-        # TODO
 
     def forward(self, s_t0):
         return self.layers.forward(s_t0)
@@ -66,11 +77,20 @@ class ModelCritic(nn.Module):
         super().__init__()
 
         self.layers = torch.nn.Sequential(
+            torch.nn.Linear(in_features=state_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=hidden_size),
+            torch.nn.BatchNorm1d(num_features=hidden_size),
+            torch.nn.LeakyReLU(),
+
+            torch.nn.Linear(in_features=hidden_size, out_features=1)
         )
-        # TODO
 
     def forward(self, s_t0):
         return self.layers.forward(s_t0)
+
 
 class ReplayPriorityMemory:
     def __init__(self, size, batch_size, prob_alpha=1):
@@ -92,7 +112,6 @@ class ReplayPriorityMemory:
             del self.Rs[0]
         pos = len(self.memory) - 1
         self.priorities[pos] = new_priority
-
 
     def sample(self):
         probs = np.array(self.priorities)
@@ -124,7 +143,7 @@ class A2CAgent:
         self.state_size = state_size
         self.action_size = action_size
 
-        self.gamma = args.gamma    # discount rate
+        self.gamma = args.gamma  # discount rate
         self.epsilon = args.epsilon  # exploration rate
         self.epsilon_min = args.epsilon_min
         self.epsilon_decay = args.epsilon_decay
@@ -166,23 +185,25 @@ class A2CAgent:
         self.optimizer_a.zero_grad()
         self.optimizer_c.zero_grad()
 
-        s_t0, a_t0, r_c = zip(*batch)
+        s_t0, a_t0, delta = zip(*batch)
 
         s_t0 = torch.FloatTensor(s_t0).to(args.device)
         a_t0 = torch.LongTensor(a_t0).to(args.device)
-        r_c = torch.FloatTensor(r_c).to(args.device)
+        delta = torch.FloatTensor(delta).to(args.device)
 
         v_t = self.model_c.forward(s_t0).squeeze()
+        A = delta - v_t
 
-        loss_c = 0 # TODO
+        loss_c = A ** 2
         loss_c_mean = torch.mean(loss_c)
         loss_c_mean.backward()
         self.optimizer_c.step()
 
         self.model_a = self.model_a.train()
         a_all = self.model_a.forward(s_t0)
+        a_t = a_all[range(len(a_t0)), a_t0]
 
-        loss_a = 0 #TODO
+        loss_a = -A.detach() * torch.log(a_t + 1e-8)
         loss_a_mean = torch.mean(loss_a)
         loss_a_mean.backward()
         self.optimizer_a.step()
@@ -190,6 +211,7 @@ class A2CAgent:
         self.replay_memory.update_priorities(batch_idxes, loss_a)
 
         return loss_a_mean.item(), loss_c_mean.item()
+
 
 # environment name
 env = gym.make('LunarLander-v2')
@@ -202,12 +224,12 @@ all_losses_c = []
 all_t = []
 
 agent = A2CAgent(
-    env.observation_space.shape[0], # first 2 are position in x axis and y axis(hieght) , other 2 are the x,y axis velocity terms, lander angle and angular velocity, left and right left contact points (bool)
+    env.observation_space.shape[0],
+    # first 2 are position in x axis and y axis(hieght) , other 2 are the x,y axis velocity terms, lander angle and angular velocity, left and right left contact points (bool)
     env.action_space.n
 )
 is_end = False
 PLOT_REFRESH_RATE = 10
-
 
 for e in range(args.episodes):
     s_t0 = env.reset()
@@ -215,17 +237,19 @@ for e in range(args.episodes):
 
     transitions = []
     states_t1 = []
+    end_t1 = []
     for t in range(args.max_steps):
         if args.is_render and len(all_scores):
-            if e % PLOT_REFRESH_RATE == 0 and all_scores[-1] > 100:
-                env.render()
-                time.sleep(0.01)
+            # if e % PLOT_REFRESH_RATE == 0 and all_scores[-1] > 100:
+            env.render()
+            time.sleep(0.01)
         a_t0 = agent.act(s_t0)
         s_t1, r_t1, is_end, _ = env.step(a_t0)
+        end_t1.append(is_end)
 
         reward_total += r_t1
 
-        if t == args.max_steps-1:
+        if t == args.max_steps - 1:
             is_end = True
 
         transitions.append([s_t0, a_t0, r_t1])
@@ -237,8 +261,16 @@ for e in range(args.episodes):
                 all_scores.append(reward_total)
             break
 
-    # TODO add to replay memory
-    # agent.replay_memory.push(tr)
+    t_states_t1 = torch.FloatTensor(states_t1).to(args.device)
+    v_t1 = agent.model_c.forward(t_states_t1)
+    np_v_t1 = v_t1.cpu().data.numpy().squeeze()
+    for t in range(len(transitions)):
+        s_t0, a_t0, r_t1 = transitions[t]
+        is_end = end_t1[t]
+        delta = r_t1
+        if not is_end:
+            delta = r_t1 + args.gamma * np_v_t1[t]
+        agent.replay_memory.push([s_t0, a_t0, delta])
 
     loss = loss_a = loss_c = 0
     if len(agent.replay_memory) > args.batch_size:
